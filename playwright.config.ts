@@ -4,12 +4,12 @@ export default defineConfig({
   testDir: './tests/e2e',
   timeout: 30_000,
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:5180',
     trace: 'retain-on-failure',
   },
   webServer: {
     command: 'yarn dev',
-    url: 'http://localhost:5173',
+    url: 'http://localhost:5180',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

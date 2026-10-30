@@ -24,7 +24,7 @@ const boolFromEnv = (defaultValue: boolean) =>
 export const envSchema = z.object({
   // ── 服务 ──────────────────────────────────────────────
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.coerce.number().int().positive().default(3000),
+  PORT: z.coerce.number().int().positive().default(3100),
   /** ⚠️ 默认只听本机。要局域网访问再改（改了要在 UI 上提示风险）。 */
   HOST: z.string().default('127.0.0.1'),
 

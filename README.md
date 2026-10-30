@@ -61,7 +61,7 @@ cp .env.example .env      # ⚠️ 必须填 JWT_SECRET（≥ 16 位），否则
 yarn dev
 ```
 
-- 前端 <http://localhost:5173> · 后端 <http://localhost:3000>
+- 前端 <http://localhost:5180> · 后端 <http://localhost:3100>
 - 首次访问会引导创建本地账号 → 强制改密 → 去「设置 → 模型」填一条模型 → 回聊天页开聊
 
 **不用 Docker，不用 MySQL，不用 Qdrant。**
