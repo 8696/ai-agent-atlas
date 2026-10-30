@@ -1,0 +1,38 @@
+# 依赖
+node_modules/
+.pnp
+.pnp.js
+
+# 构建产物
+dist/
+dist-web/
+*.tsbuildinfo
+
+# 本地数据（对话 / 记忆 / 向量 / 工作区 / 密钥）——⚠️ 绝不能进 git
+data/
+backups/
+
+# 日志
+logs/
+*.log
+
+# 环境变量（.env.example 进 git，.env 不进）
+.env
+.env.local
+.env.*.local
+
+# 测试产物
+test-results/
+playwright-report/
+blob-report/
+coverage/
+.vitest/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# 技能包（用户安装的第三方代码）
+.skills/

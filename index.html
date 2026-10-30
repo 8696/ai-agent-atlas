@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Atlas · 本地 AI Agent</title>
+    <style>
+      /* ⚠️ 首屏不闪白底：先定住背景色，等 token 加载完再切 */
+      html { background: #ffffff; }
+      html[data-theme='dark'] { background: #141414; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/web/main.tsx"></script>
+  </body>
+</html>
