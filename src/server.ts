@@ -8,7 +8,10 @@ import { initDatabase } from './db.js';
 
 const app = new Koa();
 
-app.use(cors({ origin: config.NODE_ENV === 'production' ? false : true }));
+// 生产是同源部署 → 不挂 CORS 中间件；开发放开给 Vite
+if (config.NODE_ENV !== 'production') {
+  app.use(cors({ origin: '*' }));
+}
 app.use(bodyParser());
 app.use(async (ctx, next) => {
   const started = Date.now();

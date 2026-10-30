@@ -7,6 +7,8 @@ import { config } from './config.js';
  */
 export const logger = pino({
   level: config.LOG_LEVEL,
-  transport: config.NODE_ENV === 'development' ? { target: 'pino-pretty' } : undefined,
+  // ⚠️ exactOptionalPropertyTypes 下不能写 `transport: cond ? {...} : undefined`，
+  //    要用条件展开
+  ...(config.NODE_ENV === 'development' ? { transport: { target: 'pino-pretty' } } : {}),
   base: { service: 'atlas' },
 });
