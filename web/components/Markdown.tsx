@@ -14,7 +14,7 @@ import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
  * 切深色时不用重新加载 CSS。
  */
 
-function CodeBlock({ html, raw }: { html: string; raw: string }) {
+function CodeBlock({ html, raw, language }: { html: string; raw: string; language: string }) {
   const [copied, setCopied] = useState(false);
   const { token } = theme.useToken();
 
@@ -38,16 +38,18 @@ function CodeBlock({ html, raw }: { html: string; raw: string }) {
         overflow: 'hidden',
       }}
     >
-      <Tooltip title={copied ? '已复制' : '复制代码'}>
-        <Button
-          size="small"
-          type="text"
-          aria-label="复制代码"
-          icon={copied ? <CheckOutlined /> : <CopyOutlined />}
-          onClick={copy}
-          style={{ position: 'absolute', top: 4, right: 4, zIndex: 1 }}
-        />
-      </Tooltip>
+      <div className="atlas-code-label">
+        <span>{language}</span>
+        <Tooltip title={copied ? '已复制' : '复制代码'}>
+          <Button
+            size="small"
+            type="text"
+            aria-label="复制代码"
+            icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+            onClick={copy}
+          />
+        </Tooltip>
+      </div>
       <pre className="hljs" style={{ margin: 0, padding: 12, overflowX: 'auto' }}>
         <code dangerouslySetInnerHTML={{ __html: html }} />
       </pre>
@@ -71,7 +73,7 @@ export function Markdown({ children }: { children: string }) {
           const html = hljs.getLanguage(language)
             ? hljs.highlight(raw, { language }).value
             : hljs.highlightAuto(raw).value;
-          return <CodeBlock html={html} raw={raw} />;
+          return <CodeBlock html={html} raw={raw} language={language ?? 'text'} />;
         },
         a: ({ children, href }) => (
           <a href={href} target="_blank" rel="noreferrer noopener">

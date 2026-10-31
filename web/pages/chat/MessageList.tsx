@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { Button, Empty, Space, Typography, theme } from 'antd';
-import { RedoOutlined, RobotOutlined } from '@ant-design/icons';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Spin } from 'antd';
+import { ArrowRightOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
 
@@ -28,9 +28,56 @@ const SUGGESTIONS = [
   '我该怎么启动前后端？',
 ];
 
-export function MessageList({ messages, status, onRegenerate, onPickSuggestion }: Props) {
-  const { token } = theme.useToken();
+function partText(message: UIMessage, type: 'text' | 'reasoning'): string {
+  return message.parts
+    .filter((part) => part.type === type)
+    .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
+    .join('');
+}
 
+function Caret() {
+  return <span className="atlas-caret" aria-hidden />;
+}
+
+/** 思考 —— 进行中展开并跟着滚到底；结束后收起。点标题可再打开。 */
+function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
+  const [open, setOpen] = useState(live);
+  const scroller = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!live) setOpen(false);
+  }, [live]);
+
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [text, open]);
+
+  if (!text) return null;
+
+  return (
+    <div className="atlas-think">
+      <button
+        type="button"
+        className="atlas-think-label"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className={open ? 'atlas-think-mark is-open' : 'atlas-think-mark'} aria-hidden />
+        {live ? '思考中' : '思考'}
+      </button>
+      {open ? (
+        <div ref={scroller} className="atlas-think-text">
+          {text}
+          {live ? <Caret /> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function MessageList({ messages, status, onRegenerate, onPickSuggestion }: Props) {
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const message = messages[i];
@@ -41,97 +88,70 @@ export function MessageList({ messages, status, onRegenerate, onPickSuggestion }
 
   if (messages.length === 0) {
     return (
-      <div style={{ padding: '48px 0' }}>
-        <Empty
-          image={<RobotOutlined style={{ fontSize: 48, opacity: 0.4 }} />}
-          description={
-            <Space orientation="vertical" size={4}>
-              <Typography.Text strong>Atlas 在这儿</Typography.Text>
-              <Typography.Text type="secondary">
-                直接说话就行 —— 它会调用模型回答你。
-              </Typography.Text>
-            </Space>
-          }
-        >
-          <Space wrap>
-            {SUGGESTIONS.map((text) => (
-              <Button key={text} size="small" onClick={() => onPickSuggestion?.(text)}>
-                {text}
-              </Button>
-            ))}
-          </Space>
-        </Empty>
+      <div className="atlas-welcome">
+        <p className="atlas-kicker">Atlas</p>
+        <h1>今天想做什么</h1>
+        <p className="atlas-welcome-lead">
+          直接说话就行。它会调用已配置的模型回答你；工具和会话记录还没接上。
+        </p>
+        <div className="atlas-suggests">
+          {SUGGESTIONS.map((text) => (
+            <button
+              key={text}
+              type="button"
+              className="atlas-suggest"
+              onClick={() => onPickSuggestion?.(text)}
+            >
+              <span>{text}</span>
+              <ArrowRightOutlined className="atlas-suggest-arrow" />
+            </button>
+          ))}
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div className="atlas-thread">
       {messages.map((message) => {
-        const text = message.parts
-          .filter((part) => part.type === 'text')
-          .map((part) => (part.type === 'text' ? part.text : ''))
-          .join('');
+        const text = partText(message, 'text');
+        const reasoning = partText(message, 'reasoning');
         const isUser = message.role === 'user';
-        const streaming =
-          status === 'streaming' && message.id === lastAssistantId;
+        const streaming = status === 'streaming' && message.id === lastAssistantId;
+        const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
 
         if (isUser) {
           return (
-            <div
-              key={message.id}
-              style={{ display: 'flex', justifyContent: 'flex-end' }}
-            >
-              <div
-                style={{
-                  maxWidth: '80%',
-                  padding: '10px 14px',
-                  borderRadius: token.borderRadius,
-                  background: token.colorPrimaryBg,
-                  color: token.colorText,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {text}
+            <div key={message.id} className="atlas-row-user">
+              <div className="atlas-bubble-user">{text}</div>
+              <div className="atlas-avatar atlas-avatar-user" aria-hidden>
+                M
               </div>
             </div>
           );
         }
 
         return (
-          <div key={message.id} style={{ maxWidth: 760 }}>
-            <div
-              className="atlas-markdown"
-              style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
-            >
-              {text ? <Markdown>{text}</Markdown> : null}
-              {streaming ? (
-                <span
-                  aria-hidden
-                  style={{
-                    display: 'inline-block',
-                    width: 8,
-                    height: 16,
-                    marginLeft: 2,
-                    verticalAlign: 'text-bottom',
-                    background: token.colorPrimary,
-                    animation: 'atlas-blink 1s steps(2, start) infinite',
-                  }}
-                />
+          <article key={message.id} className="atlas-row-ai">
+            <div className="atlas-avatar" aria-hidden>
+              A
+            </div>
+            <div className="atlas-ai-body">
+              <ThinkingTrace text={reasoning} live={reasoningLive} />
+              {text ? (
+                <div className="atlas-answer atlas-markdown">
+                  <Markdown>{text}</Markdown>
+                  {streaming ? <Caret /> : null}
+                </div>
+              ) : null}
+              {streaming && !text ? <Spin size="small" /> : null}
+              {!streaming && message.id === lastAssistantId ? (
+                <button type="button" className="atlas-redo" onClick={() => onRegenerate(message.id)}>
+                  重新生成
+                </button>
               ) : null}
             </div>
-            {!streaming && message.id === lastAssistantId ? (
-              <Button
-                size="small"
-                type="text"
-                icon={<RedoOutlined />}
-                onClick={() => onRegenerate(message.id)}
-              >
-                重新生成
-              </Button>
-            ) : null}
-          </div>
+          </article>
         );
       })}
     </div>

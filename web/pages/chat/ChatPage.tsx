@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { DefaultChatTransport } from 'ai';
 import { useChat } from '@ai-sdk/react';
-import { Alert, Button, Space, Spin, Typography, theme } from 'antd';
+import { Alert, Button, Space, Spin, Typography } from 'antd';
 import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import { toUserMessage } from '../../lib/apiError';
@@ -16,15 +16,11 @@ import { useModelStore } from '../../lib/stores/modelStore';
  * ⚠️ **本期没有会话落库** —— 刷新页面消息就没了（会话管理见 [12-b B2](../docs/12-b-需求-对话与编排.md)）。
  */
 export function ChatPage() {
-  const { token } = theme.useToken();
-
   // ⚠️ **transport 只建一次** —— 每次渲染新建会让 useChat 重新发请求
   const transport = useMemo(() => new DefaultChatTransport({ api: '/api/v1/chat' }), []);
 
   const { messages, sendMessage, status, stop, error, regenerate, clearError } =
     useChat({ transport });
-
-  const [thinking, setThinking] = useState(false);
 
   const configured = useModelStore((state) => state.configured);
   const loadingModels = useModelStore((state) => state.loading);
@@ -53,7 +49,7 @@ export function ChatPage() {
 
   const submit = (text: string) => {
     clearError();
-    void sendMessage({ text }, { body: { thinking } });
+    void sendMessage({ text });
   };
 
   /**
@@ -72,14 +68,7 @@ export function ChatPage() {
   };
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: 'calc(100vh - 56px - 48px)',
-        minHeight: 320,
-      }}
-    >
+    <div className="atlas-chat">
       {!loadingModels && !configured ? (
         <Alert
           type="warning"
@@ -115,10 +104,7 @@ export function ChatPage() {
         />
       ) : null}
 
-      <div
-        ref={scrollRef}
-        style={{ flex: 1, overflowY: 'auto', paddingRight: 4, minHeight: 0 }}
-      >
+      <div ref={scrollRef} className="atlas-chat-scroll">
         {loadingModels && messages.length === 0 ? (
           <div style={{ padding: '48px 0', textAlign: 'center' }}>
             <Spin />
@@ -136,8 +122,6 @@ export function ChatPage() {
       <Composer
         busy={busy}
         disabled={!configured}
-        thinking={thinking}
-        onThinkingChange={setThinking}
         onSubmit={submit}
         onStop={() => void stop()}
       />

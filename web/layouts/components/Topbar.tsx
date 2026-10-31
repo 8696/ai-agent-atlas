@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, Popover, Space, Tooltip, Typography, theme } from 'antd';
+import { Button, Popover, Space, Tooltip, Typography } from 'antd';
 import { InfoCircleOutlined, MoonOutlined, SunOutlined } from '@ant-design/icons';
 import { useLocation } from 'react-router-dom';
 import { fetchHealth } from '../../lib/api';
@@ -20,7 +20,6 @@ const TITLES: Record<string, string> = {
 };
 
 export function Topbar() {
-  const { token } = theme.useToken();
   const location = useLocation();
   const mode = useThemeStore((state) => state.mode);
   const toggleTheme = useThemeStore((state) => state.toggle);
@@ -55,6 +54,7 @@ export function Topbar() {
 
   const title = TITLES[location.pathname] ?? 'Atlas';
   const modelName = models.find((m) => m.role === 'primary')?.name;
+  const statusText = online === null ? '连接中' : online ? '已连接' : '断线中';
 
   const about = (
     <div style={{ maxWidth: 260 }}>
@@ -62,43 +62,37 @@ export function Topbar() {
         <strong>Atlas</strong> · 本地 AI Agent（v0.1.0）
       </Typography.Paragraph>
       <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
-        后端 <code>http://localhost:3100</code> · 前端{' '}
-        <code>http://localhost:5180</code>
+        后端 <code>http://localhost:3100</code> · 前端 <code>http://localhost:5180</code>
       </Typography.Paragraph>
-      <Typography.Text type="warning">
-        无鉴权 · 仅本机可访问
-      </Typography.Text>
+      <Typography.Text type="warning">无鉴权 · 仅本机可访问</Typography.Text>
     </div>
   );
 
   return (
-    <div
-      style={{
-        height: 56,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        padding: '0 16px',
-        borderBottom: `1px solid ${token.colorBorderSecondary}`,
-        background: token.colorBgContainer,
-      }}
-    >
-      <Typography.Text strong>{title}</Typography.Text>
+    <div className="atlas-topbar">
+      <span className="atlas-topbar-title">{title}</span>
 
-      <Space size={12}>
+      <Space size={8}>
         <Tooltip title={online === false ? '连不上后端' : '后端在线'}>
-          <Badge
-            status={online === null ? 'default' : online ? 'success' : 'error'}
-            text={
-              online === null ? '连接中' : online ? '已连接' : '断线中'
-            }
-          />
+          <span className="atlas-status">
+            <span
+              className={
+                online === null
+                  ? 'atlas-status-dot'
+                  : online
+                    ? 'atlas-status-dot is-on'
+                    : 'atlas-status-dot is-off'
+              }
+              aria-hidden
+            />
+            {statusText}
+          </span>
         </Tooltip>
 
         <Tooltip title={configured ? `当前模型：${modelName ?? '未知'}` : '还没配置模型'}>
-          <Typography.Text type={configured ? undefined : 'warning'}>
+          <span className={configured ? 'atlas-model-pill' : 'atlas-model-pill is-warn'}>
             {configured ? (modelName ?? '未命名模型') : '未配置模型'}
-          </Typography.Text>
+          </span>
         </Tooltip>
 
         <Tooltip title={mode === 'dark' ? '切到浅色' : '切到深色'}>

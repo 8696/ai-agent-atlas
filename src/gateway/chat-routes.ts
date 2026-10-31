@@ -44,8 +44,6 @@ const chatRequestSchema = z.object({
   messages: z.array(uiMessageSchema),
   trigger: z.string().optional(),
   messageId: z.string().optional(),
-  /** 用户勾了「思考模式」（见 [12-b B8](../docs/12-b-需求-对话与编排.md)） */
-  thinking: z.boolean().optional(),
 });
 
 export const chatRouter = new Router({ prefix: '/api/v1' });
@@ -76,7 +74,6 @@ chatRouter.post('/chat', async (ctx) => {
   const events = streamChatReply({
     messages: parsed.data.messages,
     model,
-    thinking: parsed.data.thinking ?? false,
     signal: abort.signal,
   });
 

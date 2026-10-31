@@ -1,28 +1,59 @@
 /*
  * 全局样式 —— 只放**antd token 表达不了**的东西。
  *
- * ⚠️ **页面里写死的浅色一律换成 antd token**（见 [04-a §4.1](../docs/04-a-ui-总则布局与菜单.md)）。
- * 这里唯二写死的是 **代码高亮配色** —— 它跟着主题切，用 CSS 变量承接。
+ * ⚠️ **页面里写死的浅色一律换成变量**（见 [04-a §4.1](../docs/04-a-ui-总则布局与菜单.md)）。
+ * 壳层、气泡、代码高亮都挂在 `html[data-theme]` 上，浅色深色各一份。
  */
 
-:root {
-  --atlas-code-bg: #f6f8fa;
-  --atlas-code-fg: #24292f;
-  --atlas-code-keyword: #cf222e;
-  --atlas-code-string: #0a3069;
-  --atlas-code-number: #0550ae;
-  --atlas-code-comment: #6e7781;
-  --atlas-code-title: #8250df;
+:root,
+html[data-theme='light'] {
+  --atlas-canvas: #efeae2;
+  --atlas-surface: #fbf8f3;
+  --atlas-surface-2: #fffdf9;
+  --atlas-ink: #1c1915;
+  --atlas-muted: #6e665d;
+  --atlas-line: #e4dcd0;
+  --atlas-composer-line: rgba(28, 25, 21, 0.14);
+  --atlas-accent: #1f4f46;
+  --atlas-accent-soft: #e6f0ec;
+  --atlas-mark: #1f4f46;
+  --atlas-on-mark: #f7f3ea;
+  --atlas-user: #e5f0eb;
+  --atlas-user-mark: #2c2926;
+  --atlas-on-user: #f7f3ea;
+  --atlas-code-bg: #f3efe8;
+  --atlas-code-fg: #1c1915;
+  --atlas-code-keyword: #9f1239;
+  --atlas-code-string: #1f4f46;
+  --atlas-code-number: #9a3412;
+  --atlas-code-comment: #8a8178;
+  --atlas-code-title: #6d28d9;
+  --atlas-sans: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei',
+    'Noto Sans SC', sans-serif;
 }
 
 html[data-theme='dark'] {
-  --atlas-code-bg: #161b22;
-  --atlas-code-fg: #e6edf3;
-  --atlas-code-keyword: #ff7b72;
-  --atlas-code-string: #a5d6ff;
-  --atlas-code-number: #79c0ff;
-  --atlas-code-comment: #8b949e;
-  --atlas-code-title: #d2a8ff;
+  --atlas-canvas: #111614;
+  --atlas-surface: #1b211e;
+  --atlas-surface-2: #242c28;
+  --atlas-ink: #ece8e1;
+  --atlas-muted: #a39b92;
+  --atlas-line: #2d3531;
+  --atlas-composer-line: rgba(236, 232, 225, 0.16);
+  --atlas-accent: #8fbfb3;
+  --atlas-accent-soft: #1d2c28;
+  --atlas-mark: #1f4f46;
+  --atlas-on-mark: #f7f3ea;
+  --atlas-user: #24332e;
+  --atlas-user-mark: #2c2926;
+  --atlas-on-user: #f7f3ea;
+  --atlas-code-bg: #141a17;
+  --atlas-code-fg: #ece8e1;
+  --atlas-code-keyword: #f0a8b4;
+  --atlas-code-string: #8fbfb3;
+  --atlas-code-number: #e7c08a;
+  --atlas-code-comment: #8d8680;
+  --atlas-code-title: #d2b4f0;
 }
 
 html,
@@ -30,6 +61,529 @@ body,
 #root {
   height: 100%;
   margin: 0;
+  background: var(--atlas-canvas);
+  color: var(--atlas-ink);
+  font-family: var(--atlas-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+.atlas-shell {
+  height: 100vh;
+  overflow: hidden;
+  background: var(--atlas-canvas);
+}
+
+.atlas-main {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--atlas-canvas) !important;
+}
+
+.atlas-content {
+  min-height: 0;
+  overflow: auto;
+  padding: 24px;
+  background: transparent;
+}
+
+.atlas-content-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+.atlas-page-frame {
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.atlas-chat-frame {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-sider {
+  background: var(--atlas-surface) !important;
+  border-right: 1px solid var(--atlas-line);
+}
+
+.atlas-sider .ant-layout-sider-children {
+  height: 100%;
+}
+
+.atlas-sider-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.atlas-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 16px;
+  height: 56px;
+}
+
+.atlas-mark {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--atlas-mark);
+  color: var(--atlas-on-mark);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.atlas-brand.is-collapsed {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.atlas-brand-name {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--atlas-ink);
+}
+
+.atlas-brand-sub {
+  margin-top: 1px;
+  font-size: 12px;
+  line-height: 1.2;
+  color: var(--atlas-muted);
+}
+
+.atlas-sider-new {
+  padding: 8px 12px 4px;
+}
+
+.atlas-sider-foot {
+  margin-top: auto;
+  padding: 8px;
+  text-align: center;
+  border-top: 1px solid var(--atlas-line);
+}
+
+.atlas-topbar {
+  /* ⚠️ 不能被内容区挤矮 —— 聊天变长时收缩的是消息列表，不是顶栏 */
+  flex: 0 0 56px;
+  height: 56px;
+  min-height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--atlas-surface);
+  border-bottom: 1px solid var(--atlas-line);
+}
+
+.atlas-topbar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--atlas-ink);
+}
+
+.atlas-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--atlas-muted);
+  font-size: 13px;
+}
+
+.atlas-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 99px;
+  background: var(--atlas-muted);
+}
+
+.atlas-status-dot.is-on {
+  background: #3f8f62;
+}
+
+.atlas-status-dot.is-off {
+  background: #b42318;
+}
+
+.atlas-model-pill {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--atlas-line);
+  background: var(--atlas-surface-2);
+  color: var(--atlas-ink);
+  font-size: 12px;
+}
+
+.atlas-model-pill.is-warn {
+  color: #9a3412;
+  border-color: #f0d3b0;
+  background: #fbf3e8;
+}
+
+html[data-theme='dark'] .atlas-model-pill.is-warn {
+  color: #e7c08a;
+  border-color: #5c4630;
+  background: #2a2218;
+}
+
+.atlas-chat {
+  flex: 1;
+  min-height: 0;
+  width: min(800px, 100%);
+  margin: 0 auto;
+  padding: 0 24px 16px;
+  display: flex;
+  flex-direction: column;
+}
+
+.atlas-chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px 0 8px;
+}
+
+.atlas-welcome {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 24px 0 32px;
+}
+
+.atlas-kicker {
+  margin: 0 0 6px;
+  color: var(--atlas-muted);
+  font-size: 13px;
+}
+
+.atlas-welcome h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--atlas-ink);
+}
+
+.atlas-welcome-lead {
+  max-width: 36em;
+  margin: 8px 0 0;
+  color: var(--atlas-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.atlas-suggests {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 20px;
+  max-width: 440px;
+}
+
+.atlas-suggest {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--atlas-ink);
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-line);
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+
+.atlas-suggest:hover {
+  border-color: var(--atlas-accent);
+}
+
+.atlas-suggest:focus-visible {
+  outline: 2px solid var(--atlas-accent);
+  outline-offset: 2px;
+}
+
+.atlas-suggest-arrow {
+  color: var(--atlas-muted);
+  flex: none;
+}
+
+.atlas-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 8px;
+}
+
+.atlas-row-user {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.atlas-bubble-user {
+  max-width: min(78%, 520px);
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--atlas-user);
+  color: var(--atlas-ink);
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.65;
+}
+
+.atlas-row-ai {
+  display: flex;
+  gap: 10px;
+  max-width: 720px;
+}
+
+.atlas-avatar {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--atlas-mark);
+  color: var(--atlas-on-mark);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.atlas-avatar-user {
+  background: var(--atlas-user-mark);
+  color: var(--atlas-on-user);
+}
+
+.atlas-ai-body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding-top: 3px;
+}
+
+.atlas-think-label,
+.atlas-redo {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--atlas-muted);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.atlas-think-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.atlas-think-label:hover,
+.atlas-redo:hover {
+  color: var(--atlas-ink);
+}
+
+.atlas-think-label:focus-visible,
+.atlas-redo:focus-visible {
+  outline: 2px solid var(--atlas-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.atlas-think-mark {
+  width: 0;
+  height: 0;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 4px solid currentColor;
+}
+
+.atlas-think-mark.is-open {
+  transform: rotate(90deg);
+}
+
+.atlas-think {
+  width: 100%;
+}
+
+.atlas-think-text {
+  max-height: 168px;
+  margin-top: 6px;
+  padding-left: 10px;
+  overflow: auto;
+  border-left: 2px solid var(--atlas-line);
+  color: var(--atlas-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+.atlas-answer {
+  width: 100%;
+  color: var(--atlas-ink);
+  font-size: 15px;
+  line-height: 1.7;
+  word-break: break-word;
+}
+
+.atlas-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: var(--atlas-accent);
+  animation: atlas-blink 1s steps(2, start) infinite;
+}
+
+.atlas-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 8px 8px 8px 12px;
+  background: transparent;
+  border: 1px solid var(--atlas-composer-line);
+  border-radius: 8px;
+}
+
+.atlas-composer:focus-within {
+  border-color: var(--atlas-composer-line);
+  box-shadow: none;
+}
+
+.atlas-composer .ant-input,
+.atlas-composer textarea {
+  min-height: 72px;
+  padding: 4px 0;
+  background: transparent;
+  border: 0;
+  outline: none;
+  box-shadow: none;
+}
+
+.atlas-composer .ant-input-textarea,
+.atlas-composer .ant-input-textarea:focus,
+.atlas-composer .ant-input-textarea:focus-within,
+.atlas-composer textarea:focus,
+.atlas-composer textarea:focus-visible,
+.atlas-composer .ant-input:focus,
+.atlas-composer .ant-input-focused {
+  border-color: transparent;
+  outline: none;
+  box-shadow: none;
+}
+
+.atlas-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding-bottom: 2px;
+}
+
+.atlas-sessions-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.atlas-sessions-head h1 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.atlas-sessions-head p {
+  margin: 6px 0 0;
+  max-width: 42em;
+  color: var(--atlas-muted);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.atlas-panel {
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.atlas-filters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--atlas-line);
+}
+
+.atlas-empty {
+  padding: 48px 16px;
+}
+
+.atlas-code-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 4px 12px;
+  border-bottom: 1px solid var(--atlas-line);
+  color: var(--atlas-muted);
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (max-width: 992px) {
+  .atlas-content {
+    padding: 16px;
+  }
+
+  .atlas-chat {
+    padding: 0 16px 12px;
+  }
+
+  .atlas-welcome h1 {
+    font-size: 20px;
+  }
+
+  .atlas-model-pill {
+    display: none;
+  }
 }
 
 /* 滚动条跟着主题切（见 [04-a §4.5](../docs/04-a-ui-总则布局与菜单.md)） */
@@ -111,13 +665,54 @@ body,
   color: var(--atlas-code-number);
 }
 
-/* Markdown 里的段落别贴太紧 */
 .atlas-markdown > *:first-child {
   margin-top: 0;
 }
 
 .atlas-markdown > *:last-child {
   margin-bottom: 0;
+}
+
+.atlas-markdown p,
+.atlas-markdown ul,
+.atlas-markdown ol {
+  margin: 0.55em 0;
+}
+
+.atlas-markdown h1,
+.atlas-markdown h2,
+.atlas-markdown h3 {
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.atlas-markdown a {
+  color: var(--atlas-accent);
+}
+
+.atlas-markdown blockquote {
+  margin: 0.7em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--atlas-accent);
+  color: var(--atlas-muted);
+}
+
+.atlas-markdown table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 13px;
+}
+
+.atlas-markdown th,
+.atlas-markdown td {
+  border: 1px solid var(--atlas-line);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.atlas-markdown th {
+  background: var(--atlas-accent-soft);
 }
 
 /* 流式中的闪烁光标（见 [04-b §4.1.1](../docs/04-b-ui-聊天页.md)） */

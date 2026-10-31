@@ -67,14 +67,11 @@ export function resolveFallback(env: Env = config): ResolvedModel | undefined {
 }
 
 /**
- * 推理预算解析（对齐 Hermes 的「思考模式」）：
- * - 模型配了 > 0 → **一直生效**
- * - 没配但用户这轮勾了 → 兜底 1024
- * - 没配也没勾 → 0（关）
+ * 推理预算 —— 只看 `.env` 的 `LLM_THINKING_BUDGET`。
+ * 大于 0 就开，0 就关。聊天页没有开关。
  */
-export function resolveThinkingBudget(model: ResolvedModel, userEnabled: boolean): number {
-  if (model.thinkingBudget > 0) return model.thinkingBudget;
-  return userEnabled ? 1024 : 0;
+export function resolveThinkingBudget(model: ResolvedModel): number {
+  return model.thinkingBudget;
 }
 
 /**
@@ -84,24 +81,24 @@ export function resolveThinkingBudget(model: ResolvedModel, userEnabled: boolean
  * 它们都提供 Anthropic 兼容端点（`anthropicApiUrl`），行为一致：
  * 标准 `/v1/messages` · 标准 SSE 事件 · 标准 `thinking` 块 · 标准 tool_use。
  */
-export function createChatModel(
-  model: ResolvedModel,
-  opts?: { thinking?: boolean },
-): ChatAnthropic {
+export function createChatModel(model: ResolvedModel): ChatAnthropic {
   if (!model.apiKey) {
     throw new Error(
       `模型「${model.name}」缺少 API Key —— 检查 .env 里的 LLM_API_KEY`,
     );
   }
-  const budget = resolveThinkingBudget(model, opts?.thinking ?? false);
+  const budget = resolveThinkingBudget(model);
+  const thinkingOn = budget > 0;
   return new ChatAnthropic({
     model: model.modelId,
     anthropicApiKey: model.apiKey,
     ...(model.baseUrl ? { anthropicApiUrl: model.baseUrl } : {}),
-    temperature: model.temperature,
+    // ⚠️ **开了思考就不能再传自定义温度** —— Anthropic 要求 temperature = 1，
+    //    否则适配器直接抛错，这一轮连正文都出不来
+    temperature: thinkingOn ? 1 : model.temperature,
     // ⚠️ **Anthropic 要求 `max_tokens > thinking.budget_tokens`** —— 400 就来了
     //    这里把上限抬到「预算 + 余量」
-    ...(budget > 0
+    ...(thinkingOn
       ? {
           maxTokens: Math.max(model.maxTokens, budget + 1024),
           thinking: { type: 'enabled' as const, budget_tokens: budget },

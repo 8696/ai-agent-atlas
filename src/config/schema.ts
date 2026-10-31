@@ -49,8 +49,8 @@ export const envSchema = z.object({
   LLM_FALLBACK_BASE_URL: z.string().optional(),
   LLM_FALLBACK_API_KEY: z.string().optional(),
   LLM_FALLBACK_MODEL: z.string().optional(),
-  /** 推理预算（0 = 关）—— ⚠️ Anthropic 要求 `LLM_MAX_TOKENS > 预算` */
-  LLM_THINKING_BUDGET: z.coerce.number().int().nonnegative().default(0),
+  /** 推理预算（默认 1024 = 开，0 = 关）—— ⚠️ Anthropic 要求 `LLM_MAX_TOKENS > 预算` */
+  LLM_THINKING_BUDGET: z.coerce.number().int().nonnegative().default(1024),
   /** 单次输出上限 */
   LLM_MAX_TOKENS: z.coerce.number().int().positive().default(8192),
   /** 采样温度 */

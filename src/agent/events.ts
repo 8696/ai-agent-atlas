@@ -1,5 +1,7 @@
 import type { UIMessageChunk } from 'ai';
 import type { ChatEvent } from '../services/chat';
+
+export type { ChatEvent };
 import { sanitizeMessage } from '../lib/errors';
 
 /**
@@ -12,6 +14,8 @@ import { sanitizeMessage } from '../lib/errors';
  *
  * | 领域事件        | SSE part                  | 前端表现           |
  * | --------------- | ------------------------- | ------------------ |
+ * | 思考增量        | `reasoning-delta`         | 正文上方的思考区   |
+ * | 思考开始 / 结束 | `reasoning-start` / `reasoning-end` | —           |
  * | 文本增量        | `text-delta`              | 气泡里逐字出现     |
  * | 文本开始 / 结束 | `text-start` / `text-end`  | —                  |
  * | 图结束          | `finish`                  | 结束 loading 状态  |
@@ -23,6 +27,8 @@ import { sanitizeMessage } from '../lib/errors';
 
 /** 文本块的 id —— 一个 assistant 消息里只有一段正文，用固定 id 即可 */
 const TEXT_PART_ID = '0';
+/** 第一段思考的 id；思考和正文交错时再往后编号 */
+const REASONING_PART_ID = 'reasoning';
 
 export interface ChatEventStreamOptions {
   /** 领域事件流 */
@@ -42,8 +48,30 @@ export async function* createChatEventStream(
   yield { type: 'start-step' };
 
   let textStarted = false;
+  let reasoningOpen = false;
+  let reasoningCount = 0;
+  let reasoningId = REASONING_PART_ID;
+
+  const closeReasoning = function* (): Generator<UIMessageChunk> {
+    if (!reasoningOpen) return;
+    yield { type: 'reasoning-end', id: reasoningId };
+    reasoningOpen = false;
+  };
+
   try {
     for await (const event of options.events) {
+      if (event.type === 'reasoning-delta') {
+        if (!reasoningOpen) {
+          reasoningCount += 1;
+          reasoningId = reasoningCount === 1 ? REASONING_PART_ID : `${REASONING_PART_ID}-${reasoningCount}`;
+          yield { type: 'reasoning-start', id: reasoningId };
+          reasoningOpen = true;
+        }
+        yield { type: 'reasoning-delta', id: reasoningId, delta: event.delta };
+        continue;
+      }
+
+      yield* closeReasoning();
       if (!textStarted) {
         yield { type: 'text-start', id: TEXT_PART_ID };
         textStarted = true;
@@ -51,6 +79,7 @@ export async function* createChatEventStream(
       yield { type: 'text-delta', id: TEXT_PART_ID, delta: event.delta };
     }
   } finally {
+    yield* closeReasoning();
     if (textStarted) yield { type: 'text-end', id: TEXT_PART_ID };
     yield { type: 'finish-step' };
     yield { type: 'finish' };

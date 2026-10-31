@@ -20,15 +20,36 @@ import { toLangChainMessages, type IncomingUiMessage } from './chat-messages';
 export type { IncomingUiMessage } from './chat-messages';
 
 /** 一轮对话的事件（**图事件的最小形状** —— 将来图驱动时从这里长出来） */
-export type ChatEvent = { type: 'text-delta'; delta: string };
+export type ChatEvent =
+  | { type: 'text-delta'; delta: string }
+  | { type: 'reasoning-delta'; delta: string };
+
+/**
+ * 从一块模型增量里取出思考文本。
+ *
+ * Anthropic 兼容端点把思考放在独立块里（`thinking` / `reasoning`），
+ * 不在 `.text` 里。假模型只有 `.text`，这里直接跳过。
+ */
+function readReasoningDelta(chunk: { contentBlocks?: unknown }): string {
+  if (!Array.isArray(chunk.contentBlocks)) return '';
+  let out = '';
+  for (const block of chunk.contentBlocks) {
+    if (!block || typeof block !== 'object') continue;
+    const record = block as { type?: unknown; reasoning?: unknown; thinking?: unknown };
+    if (record.type === 'reasoning' && typeof record.reasoning === 'string') {
+      out += record.reasoning;
+    } else if (record.type === 'thinking' && typeof record.thinking === 'string') {
+      out += record.thinking;
+    }
+  }
+  return out;
+}
 
 export interface StreamChatOptions {
   /** 前端发来的历史消息 */
   messages: IncomingUiMessage[];
   /** 已解析的模型（由调用方 `resolveModel()` 拿 —— 没配就别进这里） */
   model: ResolvedModel;
-  /** 用户勾了「思考模式」 */
-  thinking?: boolean;
   /** 客户端断开时 abort —— 上游调用要真的停掉 */
   signal?: AbortSignal;
 }
@@ -44,9 +65,7 @@ export async function* streamChatReply(
   const systemPrompt = buildSystemPrompt();
   const history = toLangChainMessages(options.messages);
 
-  const chatModel = createChatModel(options.model, {
-    thinking: options.thinking ?? false,
-  });
+  const chatModel = createChatModel(options.model);
 
   // ⚠️ **system 在最前** —— 人格与边界规则必须压过历史消息里的任何指令
   const messages: BaseMessage[] = [new SystemMessage(systemPrompt), ...history];
@@ -57,7 +76,9 @@ export async function* streamChatReply(
 
   for await (const chunk of stream) {
     if (options.signal?.aborted) break;
-    // ⚠️ `.text` 只取文本块 —— 思考块 / 工具块不会被当成正文吐给前端
+    const reasoning = readReasoningDelta(chunk);
+    if (reasoning) yield { type: 'reasoning-delta', delta: reasoning };
+    // ⚠️ `.text` 只取文本块 —— 思考块走上面的 reasoning，不混进正文
     const delta = chunk.text;
     if (delta) yield { type: 'text-delta', delta };
   }

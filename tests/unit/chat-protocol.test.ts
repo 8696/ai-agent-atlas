@@ -90,6 +90,33 @@ describe('协议翻译（领域事件 → UI Message Stream）', () => {
     expect(chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step', 'finish-step', 'finish']);
   });
 
+  it('思考在正文前面，两段各自开合', async () => {
+    async function* events(): AsyncGenerator<ChatEvent> {
+      yield { type: 'reasoning-delta', delta: '先想' };
+      yield { type: 'reasoning-delta', delta: '一下' };
+      yield { type: 'text-delta', delta: '答' };
+    }
+    const chunks = await collect(createChatEventStream({ events: events() }));
+    expect(chunks.map((chunk) => chunk.type)).toEqual([
+      'start',
+      'start-step',
+      'reasoning-start',
+      'reasoning-delta',
+      'reasoning-delta',
+      'reasoning-end',
+      'text-start',
+      'text-delta',
+      'text-end',
+      'finish-step',
+      'finish',
+    ]);
+    const reasoning = chunks
+      .filter((chunk) => chunk.type === 'reasoning-delta')
+      .map((chunk) => ('delta' in chunk ? chunk.delta : ''))
+      .join('');
+    expect(reasoning).toBe('先想一下');
+  });
+
   it('文本增量的内容原样透传', async () => {
     async function* events(): AsyncGenerator<ChatEvent> {
       yield { type: 'text-delta', delta: '哈' };
