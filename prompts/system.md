@@ -21,5 +21,11 @@
 
 - 日期：{{date}}
 - 可用工具：{{tools}}
-- 已加载技能：{{skills}}
-- 相关记忆：{{memories}}
+
+{{skills}}
+
+{{summary}}
+
+{{memories}}
+
+{{retrieval}}

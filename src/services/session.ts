@@ -220,6 +220,70 @@ export async function touchSession(id: string): Promise<void> {
 }
 
 /**
+ * 改会话的元数据（**合并，不是覆盖**）。
+ *
+ * 📌 **会话级设置走这里** —— 模型切换、思考开关、人格文件、
+ * 摘要边界都存在 `sessions.metadata` 里（见 [12-b B9](../docs/12-b-需求-对话与编排.md)）。
+ */
+export async function updateSessionMetadata(
+  id: string,
+  patch: Record<string, unknown>,
+): Promise<Record<string, unknown> | null> {
+  const session = await findSession(id);
+  if (!session) return null;
+
+  let metadata: Record<string, unknown> = {};
+  if (session.metadata) {
+    try {
+      metadata = JSON.parse(session.metadata) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  }
+  const merged = { ...metadata, ...patch };
+  session.metadata = JSON.stringify(merged);
+  session.updated_at = utcNow();
+  await session.save();
+  return merged;
+}
+
+/** 会话级设置 */
+export interface SessionSettings {
+  /** 本会话指定的模型（**没指定就用全局的**） */
+  model?: string | undefined;
+  /** 本会话的思考开关（**true / false / undefined = 跟着全局**） */
+  thinking?: boolean | undefined;
+  /** 本会话的人格文件（**SOUL.md 的文件名，不含路径**） */
+  personality?: string | undefined;
+  /** 摘要覆盖到哪条消息 */
+  summaryBoundary?: string | undefined;
+}
+
+/** 读会话级设置 */
+export async function getSessionSettings(id: string): Promise<SessionSettings> {
+  const session = await findSession(id);
+  if (!session) return {};
+  let metadata: Record<string, unknown> = {};
+  if (session.metadata) {
+    try {
+      metadata = JSON.parse(session.metadata) as Record<string, unknown>;
+    } catch {
+      metadata = {};
+    }
+  }
+  const settings: SessionSettings = {};
+  if (typeof metadata['session_model'] === 'string') settings.model = metadata['session_model'];
+  if (typeof metadata['thinking'] === 'boolean') settings.thinking = metadata['thinking'];
+  if (typeof metadata['personality'] === 'string') {
+    settings.personality = metadata['personality'];
+  }
+  if (typeof metadata['summary_boundary'] === 'string') {
+    settings.summaryBoundary = metadata['summary_boundary'];
+  }
+  return settings;
+}
+
+/**
  * 保留期清理 —— 超过 `days` 天的会话连同消息一起清掉。
  *
  * ⚠️ **收藏的会话不清理** —— 收藏是「我还想留着它」的明确表态。

@@ -1,7 +1,9 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { getWriter } from '@langchain/langgraph';
 import { config } from '../../config.js';
+import { logger } from '../../logger.js';
 import { messageText } from '../../services/chat-messages.js';
+import { runSkillAutocreate } from '../../skills/autocreate.js';
 import type { AtlasStateUpdate } from '../state.js';
 
 /**
@@ -13,12 +15,24 @@ import type { AtlasStateUpdate } from '../state.js';
  * ⚠️ **提示走 `data-notice`，不混进正文** ——
  * 混进去的话，落库的正文就跟用户看到的对不上了。
  */
+
+/** 最后一条用户消息（**沉淀技能时要用**） */
+function lastUserText(messages: BaseMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.getType() === 'human') return messageText(message);
+  }
+  return '';
+}
+
 export function answerNode(
   state: {
     messages: BaseMessage[];
     notice: string | null;
     haltReason: string | null;
     steps: number;
+    sessionId?: string | undefined;
+    messageId?: string | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): AtlasStateUpdate {
@@ -37,6 +51,21 @@ export function answerNode(
   if (notice) {
     // ⚠️ **用 `getWriter(config)`** —— 见 `plan.ts` 的注释
     getWriter(runnableConfig)?.({ type: 'notice', text: notice });
+  }
+
+  // 📌 **技能自演化** —— 异步问模型「这轮有没有值得沉淀的经验」
+  //    ⚠️ **不阻塞本轮回答**（见 [12-c C4.2](../docs/12-c-需求-工具技能与扩展.md)）
+  //    ⚠️ **工具调用次数不够就不问** —— 闲聊不该沉淀技能
+  const toolCallCount = state.steps ?? 0;
+  if (toolCallCount >= config.SKILL_MIN_TOOL_CALLS) {
+    void runSkillAutocreate({
+      userText: lastUserText(state.messages),
+      assistantText: text,
+      toolCallCount,
+      ...(state.messageId ? { turnId: state.messageId } : {}),
+    }).catch((err: unknown) => {
+      logger.warn({ err }, '技能自演化失败 —— 不影响本轮回答');
+    });
   }
 
   return { finalText: text };

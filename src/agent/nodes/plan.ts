@@ -5,8 +5,17 @@ import { getWriter } from '@langchain/langgraph';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { scanInjection, tightenSensitivity } from '../../lib/security/injection.js';
+import { estimateTokens } from '../../lib/tokens.js';
 import { buildSystemPrompt } from '../../services/prompt.js';
-import { createChatModel, resolveModel } from '../../services/model.js';
+import {
+  createChatModel,
+  resolveFallback,
+  resolveModel,
+  type ResolvedModel,
+} from '../../services/model.js';
+import { recordUsage } from '../../services/cost.js';
+import { getSessionSettings } from '../../services/session.js';
+import { requestSignal } from '../abort.js';
 import { getToolRegistry, toLangChainTools } from '../../tools/registry.js';
 import { selectTools } from '../../tools/selection.js';
 import { assembleToolCalls } from '../tool-calls.js';
@@ -57,19 +66,59 @@ function describeTools(names: string[]): string {
 }
 
 /**
+ * 会话级模型覆盖（**`/model <名称>` 切的**）。
+ *
+ * ⚠️ **只认主模型与备用模型** —— 认不出来就用主模型，
+ * 不接受任意模型标识（那是配置问题，不是命令能解决的）。
+ */
+function pickSessionModel(primary: ResolvedModel, name: string | undefined): ResolvedModel {
+  if (!name) return primary;
+  const fallback = resolveFallback();
+  if (fallback && fallback.name === name) return fallback;
+  if (primary.name === name) return primary;
+  logger.warn({ name }, '会话指定的模型认不出来 —— 仍用主模型');
+  return primary;
+}
+
+/**
  * 计划节点。
  *
  * @param state 图状态
  * @param runnableConfig LangGraph 传进来的配置（**信号、writer 都在里面**）
  */
 export async function planNode(
-  state: { messages: BaseMessage[] },
+  state: {
+    messages: BaseMessage[];
+    summary?: string | undefined;
+    memories?: string | undefined;
+    retrieval?: string | undefined;
+    skills?: string | undefined;
+    sessionId?: string | undefined;
+    messageId?: string | undefined;
+  },
   runnableConfig: { signal?: AbortSignal },
 ): Promise<AtlasStateUpdate> {
-  const model = resolveModel();
-  if (!model) {
+  const primary = resolveModel();
+  if (!primary) {
     throw new Error('还没配置模型 —— 去改 .env 的 LLM_MODEL');
   }
+
+  // ── 会话级设置（**模型 / 思考开关 / 人格**） ──
+  let sessionModel = primary;
+  let thinkingBudget = primary.thinkingBudget;
+  let personality: string | undefined;
+  if (state.sessionId) {
+    try {
+      const settings = await getSessionSettings(state.sessionId);
+      sessionModel = pickSessionModel(primary, settings.model);
+      if (settings.thinking === false) thinkingBudget = 0;
+      else if (settings.thinking === true) thinkingBudget = sessionModel.thinkingBudget;
+      personality = settings.personality;
+    } catch (err) {
+      logger.warn({ err, sessionId: state.sessionId }, '读会话设置失败 —— 用全局配置');
+    }
+  }
+  const model: ResolvedModel = { ...sessionModel, thinkingBudget };
 
   // ── 工具池裁剪 ──
   const registry = getToolRegistry();
@@ -83,13 +132,16 @@ export async function planNode(
   if (scan.detected) {
     logger.warn({ matches: scan.matches }, '用户消息里出现疑似提示词注入 —— 工具档已收紧');
   }
-  const tools = scan.detected
-    ? selected.map((tool) => tightenSensitivity(tool, scan))
-    : selected;
+  const tools = scan.detected ? selected.map((tool) => tightenSensitivity(tool, scan)) : selected;
 
   // ── 上下文 ──
   const systemPrompt = buildSystemPrompt({
     tools: describeTools(tools.map((tool) => tool.name)),
+    memories: state.memories || undefined,
+    retrieval: state.retrieval || undefined,
+    summary: state.summary || undefined,
+    ...(state.skills ? { skills: state.skills } : {}),
+    ...(personality ? { personality } : {}),
   });
   const messages: BaseMessage[] = [new SystemMessage(systemPrompt), ...state.messages];
 
@@ -98,8 +150,19 @@ export async function planNode(
   const bound =
     tools.length > 0 ? chatModel.bindTools(toLangChainTools(tools) as never[]) : chatModel;
 
+  // 📌 **优先用网关登记的那份信号** —— LangGraph 组合出来的那个
+  //    偶尔对不上（客户端断开时上游停不下来，白烧 token）；
+  //    网关这份是**我们自己控制的**，一定准
+  const externalSignal = requestSignal(state.messageId);
+  const signal = externalSignal ?? runnableConfig.signal;
+
+  // ⚠️ **客户端已经断开了就别再调模型** —— 白烧 token
+  if (signal?.aborted) {
+    return { messages: [], notice: null };
+  }
+
   const stream = await bound.stream(messages, {
-    ...(runnableConfig.signal ? { signal: runnableConfig.signal } : {}),
+    ...(signal ? { signal } : {}),
   });
 
   // ⚠️ **用 `getWriter(config)` 而不是 `writer()`** ——
@@ -110,6 +173,8 @@ export async function planNode(
   let text = '';
   const toolCallChunks: Array<{ index?: number; id?: string; name?: string; args?: string }> = [];
   let usage = 0;
+  let inputTokens = 0;
+  let outputTokens = 0;
 
   for await (const chunk of stream) {
     if (runnableConfig.signal?.aborted) break;
@@ -118,7 +183,7 @@ export async function planNode(
       text?: string;
       contentBlocks?: unknown;
       tool_call_chunks?: Array<{ index?: number; id?: string; name?: string; args?: string }>;
-      usage_metadata?: { total_tokens?: number };
+      usage_metadata?: { total_tokens?: number; input_tokens?: number; output_tokens?: number };
     };
 
     const reasoning = readReasoningDelta(piece);
@@ -137,8 +202,39 @@ export async function planNode(
       toolCallChunks.push(...piece.tool_call_chunks);
     }
 
-    const total = piece.usage_metadata?.total_tokens;
-    if (typeof total === 'number') usage = Math.max(usage, total);
+    const meta = piece.usage_metadata;
+    if (meta) {
+      // 📌 **取最大值，不取最后一个** —— 各家把用量放在不同的 chunk 上，
+      //    取「到目前为止的最大值」才不会漏
+      if (typeof meta.total_tokens === 'number') usage = Math.max(usage, meta.total_tokens);
+      if (typeof meta.input_tokens === 'number') {
+        inputTokens = Math.max(inputTokens, meta.input_tokens);
+      }
+      if (typeof meta.output_tokens === 'number') {
+        outputTokens = Math.max(outputTokens, meta.output_tokens);
+      }
+    }
+  }
+
+  // ⚠️ **有些兼容端点在流式里不报输入 token** ——
+  //    智谱的 Anthropic 兼容端点把 `input_tokens` 放在 `message_delta` 里，
+  //    而 LangChain 的适配器只取 `output_tokens` → 流式下输入 token 直接丢了。
+  //    **报 0 时按本地估算补上** —— 宁可估，也别让记账少一大半。
+  if (inputTokens === 0) {
+    const conversation = state.messages.map((message) => messageText(message)).join('\n');
+    inputTokens = estimateTokens(`${systemPrompt}\n${conversation}`);
+  }
+  usage = inputTokens + outputTokens;
+  // 📌 **每轮记一条成本** —— 预算闸的地基（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
+  if (inputTokens > 0 || outputTokens > 0) {
+    void recordUsage({
+      sessionId: state.sessionId ?? null,
+      messageId: state.messageId ?? null,
+      scope: 'chat',
+      model: model.name,
+      inputTokens,
+      outputTokens,
+    });
   }
 
   const toolCalls = assembleToolCalls(toolCallChunks);

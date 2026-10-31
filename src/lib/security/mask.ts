@@ -35,11 +35,26 @@ export function isSecretField(name: string): boolean {
 export function maskString(value: string): string {
   let out = sanitizeMessage(value);
   for (const pattern of SECRET_VALUE_PATTERNS) {
-    out = out.replace(pattern, (match, prefix?: string) =>
-      prefix ? `${prefix}${MASK}` : MASK,
-    );
+    out = out.replace(pattern, (match, prefix?: string) => (prefix ? `${prefix}${MASK}` : MASK));
   }
   return out;
+}
+
+/**
+ * 这个字符串里有没有**疑似密钥**（**只检测，不打码**）。
+ *
+ * 📌 **给「写入前扫描」用** —— 记忆 / 技能这类持久化内容里
+ * 不该出现 API Key（见 [12-e E4](../docs/12-e-需求-观测安全与验收.md)）。
+ *
+ * ⚠️ **重新编译正则** —— `SECRET_VALUE_PATTERNS` 带 `g` 标志，
+ * 直接 `.test()` 会因为 `lastIndex` 而时灵时不灵。
+ */
+export function looksLikeSecret(value: string): boolean {
+  if (typeof value !== 'string' || value === '') return false;
+  return SECRET_VALUE_PATTERNS.some((pattern) => {
+    const probe = new RegExp(pattern.source, pattern.flags.replace('g', ''));
+    return probe.test(value);
+  });
 }
 
 /**

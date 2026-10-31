@@ -48,6 +48,50 @@ export const AtlasState = Annotation.Root({
     default: () => [],
   }),
 
+  /**
+   * 会话摘要（**早期对话折出来的那一段**）。
+   *
+   * 📌 **由 `prepare` 节点算好** —— 摘要边界之前不再喂原文，
+   * 只把这一段放进系统提示词（见 [12-d D1](../docs/12-d-需求-记忆与配置.md)）。
+   */
+  summary: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
+
+  /**
+   * 召回的长期记忆（**注入系统提示词**）。
+   *
+   * 📌 **由 `prepare` 节点算好** —— 每轮只算一次，
+   * 不在 `plan` 里反复算（见 [12-d D2](../docs/12-d-需求-记忆与配置.md)）。
+   */
+  memories: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
+
+  /**
+   * 跨会话检索的摘要（**注入系统提示词，排在记忆后面**）。
+   *
+   * 📌 **由 `prepare` 节点算好** —— 检索要调一次模型，
+   * 放节点里算就不会在工具循环里重复调（见 [12-d D3](../docs/12-d-需求-记忆与配置.md)）。
+   */
+  retrieval: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
+
+  /**
+   * 命中的技能说明（**注入系统提示词**）。
+   *
+   * 📌 **由 `prepare` 节点算好** —— 技能匹配走 FTS5，
+   * 放节点里算就不会在工具循环里重复查（见 [12-c C4](../docs/12-c-需求-工具技能与扩展.md)）。
+   */
+  skills: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
+
   /** 已执行的工具调用 id（**同一轮内不重复执行**） */
   executedToolCalls: Annotation<string[]>({
     reducer: (_current, update) => update ?? [],

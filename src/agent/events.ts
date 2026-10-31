@@ -112,6 +112,17 @@ export async function* createChatEventStream(
         continue;
       }
 
+      // 📌 **命令结果** —— 正文照常出，另带一个标记 part（前端加「命令」标签）
+      if (event.type === 'command') {
+        yield* closeReasoning();
+        yield {
+          type: 'data-command',
+          id: `command:${event.payload.command}`,
+          data: event.payload,
+        };
+        continue;
+      }
+
       yield* closeReasoning();
       if (!textStarted) {
         yield { type: 'text-start', id: TEXT_PART_ID };
@@ -143,7 +154,11 @@ export function describeError(error: unknown): string {
  */
 export type PersistedPart =
   | { type: 'text' | 'reasoning'; text: string; state: 'done'; id?: string }
-  | { type: 'data-tool-call' | 'data-pending-confirm' | 'data-notice'; id?: string; data: unknown };
+  | {
+      type: 'data-tool-call' | 'data-pending-confirm' | 'data-notice' | 'data-command';
+      id?: string;
+      data: unknown;
+    };
 
 /** part 累加器 —— **吃的是往 SSE 写出去的同一批 chunk** */
 export interface PartsAccumulator {
@@ -189,7 +204,12 @@ export function createPartsAccumulator(): PartsAccumulator {
         ensure('reasoning', chunk.id);
       } else if (chunk.type === 'reasoning-delta') {
         ensure('reasoning', chunk.id).text += chunk.delta;
-      } else if (chunk.type === 'data-tool-call' || chunk.type === 'data-pending-confirm' || chunk.type === 'data-notice') {
+      } else if (
+        chunk.type === 'data-tool-call' ||
+        chunk.type === 'data-pending-confirm' ||
+        chunk.type === 'data-notice' ||
+        chunk.type === 'data-command'
+      ) {
         // 📌 **数据 part 原样存** —— 工具卡片刷新后还在
         const id = chunk.id ?? `${chunk.type}`;
         const found = slots.find((slot) => slot.kind === 'data' && slot.id === id);
@@ -207,7 +227,8 @@ export function createPartsAccumulator(): PartsAccumulator {
       for (const slot of slots) {
         if (slot.kind === 'data') {
           out.push({
-            type: (slot.type ?? 'data-notice') as 'data-tool-call' | 'data-pending-confirm' | 'data-notice',
+            type: (slot.type ?? 'data-notice') as
+              'data-tool-call' | 'data-pending-confirm' | 'data-notice' | 'data-command',
             ...(slot.id ? { id: slot.id } : {}),
             data: slot.data,
           });

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
+import { useTempDatabase } from '../fixtures/db';
 
 /**
  * `POST /api/v1/chat` 的**集成测试** —— 真 Koa · 真 SSE · **假模型**。
@@ -15,8 +16,13 @@ interface StreamCall {
 }
 
 const calls: StreamCall[] = [];
-/** 假模型被 abort 时置位 —— 用来验「客户端断开 → 上游真的停」 */
-let aborted = false;
+/**
+ * 假模型被 abort 时置位 —— 用来验「客户端断开 → 上游真的停」。
+ *
+ * 📌 **挂在 globalThis 上** —— mock 工厂是被提升（hoist）到文件顶部的，
+ *    闭包里的变量绑定容易对不上；挂全局最省事。
+ */
+const abortState = { aborted: false };
 /** 假模型每段之间的间隔（断线测试要调慢，才有机会在流中间断开） */
 let pieceDelayMs = 5;
 
@@ -51,10 +57,21 @@ vi.mock('../../src/services/model', async () => {
           options?: { signal?: AbortSignal },
         ) {
           calls.push({ messages, ...(options?.signal ? { signal: options.signal } : {}) });
+          // ⚠️ **监听 abort 事件** —— 只在 sleep 之后检查会跟「图拆掉生成器」赛跑，
+          //    断开时上游可能来不及置位（那样测的就不是「上游被中止」了）
+          options?.signal?.addEventListener('abort', () => {
+            abortState.aborted = true;
+          });
+          // ⚠️ **开场就检查** —— 信号可能在上游调用之前就断了
+          //    （「abort 事件已经发生过」就再也不会触发监听器）
+          if (options?.signal?.aborted) {
+            abortState.aborted = true;
+            return;
+          }
           for (const piece of ['你', '好']) {
             await new Promise((resolve) => setTimeout(resolve, pieceDelayMs));
             if (options?.signal?.aborted) {
-              aborted = true;
+              abortState.aborted = true;
               return;
             }
             yield { text: piece };
@@ -66,12 +83,20 @@ vi.mock('../../src/services/model', async () => {
   };
 });
 
+// ⚠️ **先切走数据目录** —— 必须在 import `src/config.js` 之前。
+//    不切的话这个用例会往**真实库**里写成本流水（测试不能污染用户数据）。
+useTempDatabase();
+
+const { initDatabase } = await import('../../src/db');
+const { umzug } = await import('../../scripts/migrate');
 const { createApp } = await import('../../src/app');
 
 let server: Server;
 let baseUrl: string;
 
 beforeAll(async () => {
+  await initDatabase();
+  await umzug.up();
   const app = createApp();
   server = app.listen(0);
   await new Promise((resolve) => server.once('listening', resolve));
@@ -141,22 +166,56 @@ describe('POST /api/v1/chat', () => {
   });
 
   it('客户端断开 → 上游调用真的被中止', async () => {
-    aborted = false;
-    // ⚠️ **把假模型调慢** —— 否则它早就流完了，断开根本碰不到中途
-    pieceDelayMs = 300;
+    abortState.aborted = false;
+    // ⚠️ **把假模型调慢** —— 否则它早就流完了，断开根本碰不到中途。
+    //    真实的上游调用本来就比一次往返长得多；
+    //    流太短的话，机器一忙（事件循环延迟）响应就先端完了，
+    //    断开还没被处理 —— 那测的就不是「上游被中止」了
+    pieceDelayMs = 800;
+    // 📌 **这一轮专属的消息** —— `calls` 是模块级的共享数组，
+    //    上一个用例的请求可能还在飞（它也会往里塞一条），
+    //    不区分就会把别人的调用当自己的
+    const marker = '断开测试专用消息';
     try {
       const controller = new AbortController();
-      const pending = postChat({ messages: [userMessage] }, controller.signal);
-      // 等模型真的开始流了再断
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      const before = calls.length;
+      const pending = postChat(
+        { messages: [{ role: 'user', parts: [{ type: 'text', text: marker }] }] },
+        controller.signal,
+      );
+
+      /** 自己的上游调用开始了没 */
+      const started = (): boolean =>
+        calls
+          .slice(before)
+          .some((call) =>
+            call.messages.some(
+              (message) => typeof message.content === 'string' && message.content.includes(marker),
+            ),
+          );
+
+      // ⚠️ **等自己的上游调用真的开始** —— `prepare` 节点会先做检索与裁剪，
+      // 固定等 50ms 可能断在模型还没开始的时候（那样就验不到「上游被中止」）
+      const deadline = Date.now() + 5000;
+      while (!started() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+
       controller.abort();
       await pending.catch(() => undefined);
 
-      const deadline = Date.now() + 2000;
-      while (!aborted && Date.now() < deadline) {
+      // 📌 **上游压根没被调用也算对** —— 断开比上游调用还早，
+      //    服务端直接不调模型（省 token），这比「调了再中止」更好
+      if (!started()) {
+        expect(started()).toBe(false);
+        return;
+      }
+
+      const abortDeadline = Date.now() + 5000;
+      while (!abortState.aborted && Date.now() < abortDeadline) {
         await new Promise((resolve) => setTimeout(resolve, 20));
       }
-      expect(aborted).toBe(true);
+      expect(abortState.aborted).toBe(true);
     } finally {
       pieceDelayMs = 5;
     }

@@ -617,6 +617,7 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
 }
 
 .atlas-composer {
+  position: relative;
   display: flex;
   align-items: flex-end;
   gap: 4px;
@@ -1067,4 +1068,74 @@ html[data-theme='dark'] .atlas-confirm {
   border-color: var(--atlas-line);
   background: var(--atlas-surface-2);
   opacity: 0.85;
+}
+
+/* ── 斜杠命令补全（见 [12-b B9](../../docs/12-b-需求-对话与编排.md)） ── */
+
+.atlas-cmd-list {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(28, 25, 21, 0.12);
+}
+
+.atlas-cmd-item {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--atlas-ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.atlas-cmd-item.is-active,
+.atlas-cmd-item:hover {
+  background: var(--atlas-accent-soft);
+}
+
+.atlas-cmd-item:focus-visible {
+  outline: 2px solid var(--atlas-accent);
+  outline-offset: -2px;
+}
+
+.atlas-cmd-label {
+  flex: none;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.atlas-cmd-hint {
+  flex: 1;
+  overflow: hidden;
+  color: var(--atlas-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 命令结果的标记（**正文照常渲染，只是上面多一行小标签**） */
+.atlas-cmd-badge {
+  display: inline-block;
+  margin-bottom: 6px;
+  padding: 1px 8px;
+  border: 1px solid var(--atlas-line);
+  border-radius: 999px;
+  color: var(--atlas-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
 }

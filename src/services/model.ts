@@ -91,6 +91,10 @@ export function createChatModel(model: ResolvedModel): ChatAnthropic {
     model: model.modelId,
     anthropicApiKey: model.apiKey,
     ...(model.baseUrl ? { anthropicApiUrl: model.baseUrl } : {}),
+    // ⚠️ **流式也要带用量** —— 不开的话最后一个 chunk 的 `usage_metadata`
+    // 只有输出 token（输入 token 在 `message_start` 里，流式不重复给），
+    // 记账就会少记一大半（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
+    streamUsage: true,
     // ⚠️ **开了思考就不能再传自定义温度** —— Anthropic 要求 temperature = 1，
     //    否则适配器直接抛错，这一轮连正文都出不来
     temperature: thinkingOn ? 1 : model.temperature,

@@ -218,9 +218,7 @@ export function ChatPage() {
         if (result.mode === 'completed' && result.parts) {
           setMessages((prev) =>
             prev.map((message) => {
-              const hasPending = message.parts.some(
-                (part) => part.type === 'data-pending-confirm',
-              );
+              const hasPending = message.parts.some((part) => part.type === 'data-pending-confirm');
               if (!hasPending) return message;
               const kept = message.parts.filter((part) => part.type !== 'data-pending-confirm');
               return {
@@ -241,6 +239,69 @@ export function ChatPage() {
 
   const busy = status === 'submitted' || status === 'streaming';
   const errorText = error ? toUserMessage(error) : '';
+
+  /**
+   * **斜杠命令的动作**（见 [12-b B9](../../docs/12-b-需求-对话与编排.md)）。
+   *
+   * 📌 **命令在服务端解析** —— 前端只负责执行它要求的动作：
+   * 新建会话 → 切 URL · 重新生成 → 调 `regenerate` · 撤销 → 重拉历史。
+   * ⚠️ **处理过的命令要记住** —— 否则每次渲染都会重复执行。
+   */
+  const handledCommands = useRef(new Set<string>());
+
+  useEffect(() => {
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant') return;
+    const part = last.parts.find((item) => item.type === 'data-command') as
+      { type: string; id?: string | undefined; data?: unknown } | undefined;
+    if (!part) return;
+
+    const key = `${last.id}:${part.id ?? 'command'}`;
+    if (handledCommands.current.has(key)) return;
+    handledCommands.current.add(key);
+
+    const payload = part.data as
+      { command?: string; action?: string; data?: Record<string, unknown> } | undefined;
+    const action = payload?.action;
+    const extra = payload?.data ?? {};
+
+    if (action === 'new-session') {
+      const created = extra['sessionId'];
+      if (typeof created !== 'string') return;
+      void fetchSession(created)
+        .then((data) => upsertSession(data.session))
+        .catch(() => {
+          // 拉不到就先切过去，列表会在下次 load 时补上
+        });
+      setSearchParams({ session: created }, { replace: true });
+      return;
+    }
+
+    if (action === 'retry') {
+      const messageId = extra['messageId'];
+      if (typeof messageId !== 'string' || !sessionId) return;
+      void regenerate({ messageId, body: { sessionId } });
+      return;
+    }
+
+    if (action === 'undo') {
+      if (!sessionId) return;
+      void fetchSession(sessionId)
+        .then((data) => {
+          setMessages(data.messages.map(toUiMessage));
+          setFavorites(
+            Object.fromEntries(
+              data.messages
+                .filter((message) => message.favorite)
+                .map((message) => [message.id, true]),
+            ),
+          );
+        })
+        .catch(() => {
+          // 拉不到就维持现状
+        });
+    }
+  }, [messages, sessionId, regenerate, setMessages, setSearchParams, upsertSession]);
 
   return (
     <div className="atlas-chat">

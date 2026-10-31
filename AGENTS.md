@@ -38,14 +38,22 @@
 | 危险能力     | 有（Shell / 写文件 / 出网 / 浏览器）→ **必须有确认闸** | 基本没有            |
 | 扩展方向     | Skill · MCP · 长期记忆 · 多代理 · 定时任务     | 业务系统对接                 |
 
-**当前状态**：**阶段 0 完成，阶段 1「能干活」做了一半**（2026-10）——
+**当前状态**：**阶段 0 完成 · 阶段 1「能干活」主干完成 · 阶段 2「记得住」完成 ·
+阶段 4「能扩展」已开一条（Skill）**（2026-10）——
 **「打开网页就能跟模型对话」这条竖切已跑通**，**会话也落库了**，
 **而且现在它真的能干活了**：调工具、跑命令、危险操作先问人、
 后端重启能接着跑（见 [12-e §E5](./docs/12-e-需求-观测安全与验收.md)）。
+**它也开始记得事了**：长期记忆是两个 Markdown 文件、检索走 FTS5、
+长会话自动折成摘要、12 条斜杠命令服务端解析。
+**它还会自己长本事**：技能包（`data/skills/<name>/SKILL.md`）命中就注入上下文，
+干完复杂的事还能自动沉淀出新技能。
 
-- 阶段 0：A1 / B2 = ✅ · A2 / A3 / A4 / B1 / B8 = 🟡 · A5 = ⬜
+- 阶段 0：A1 / B2 / **A5** = ✅ · A2 / A3 / A4 / B1 / B8 = 🟡
 - 阶段 1：**B4 / B6 = ✅** · B3 / B5 / B7 / C1 / C2 / C3 / C6 / E4 = 🟡
   （**C2 是 10 / 15 个工具** —— 1c 批次还没做）
+- 阶段 2：**D1 / D2 / D3 / B9 = ✅**
+- 阶段 3：**A5 / D4 = ✅** · B8 / C6 = 🟡
+- 阶段 4：**C4 = ✅** · B10 / B11 / C5 = ⬜
 
 已就位的部分：
 
@@ -72,10 +80,41 @@
   - 权限闸 `src/lib/security/`（路径沙箱 · 出网校验 · 命令黑名单 · 敏感档 · 注入检测 · 脱敏）
   - **人工确认闸** `src/agent/tool-node.ts`（`interrupt()` 挂起 → `Command({ resume })` 恢复）
   - 工具卡片 `web/pages/chat/ToolCallCard.tsx` · 流水 `yarn tool:logs`
+- **记忆与检索层（已跑通）**：
+  - 长期记忆 `src/services/memory/`（`data/memory/MEMORY.md` · `USER.md`）——
+    结构化条目 · 原子写 · 字符上限 · **写前安全扫描** · 召回带用量表头
+  - 跨会话检索 `src/services/search.ts` + `src/lib/fts.ts`——
+    **FTS5 + trigram**（中文能搜）· 触发器同步 · 不可用就退回时间倒序
+  - 会话摘要 `src/services/session-summary.ts`——
+    边界之前只剩摘要 · `/compress` 与自动压缩走同一个函数
+  - 记忆抽取 `src/services/memory/extract.ts`——
+    T1 正则预筛 → T2 调模型（fire-and-forget）
+  - 命令行 `yarn memory:*` · `yarn search <关键词>`
+- **斜杠命令（已跑通）**：
+  - 服务端 `src/services/command.ts`（**12 条 · 零 LLM 调用**）·
+    `GET /api/v1/commands`（前端补全的清单）
+  - 前端 `web/pages/chat/Composer.tsx`（`/` 弹候选 · `Tab` 补全）·
+    命令气泡标签 `web/pages/chat/MessageList.tsx`
+- **技能机制（已跑通）**：
+  - `src/skills/`（`types` · `frontmatter` · `store` · `match` · `inject` · `tools` · `autocreate`）
+  - 技能包 = `data/skills/<name>/SKILL.md`（frontmatter + 正文）+ 可选 `scripts/`
+  - 匹配走 **FTS5 + trigram**（`skills_fts`）——
+    ⚠️ **索引侧与查询侧都做「二元组 + 空格」展开**（2 字中文词也能命中）
+  - 命中的技能正文注入系统提示词（`{{skills}}`）· 受条数与 token 预算双重裁剪
+  - **每个带脚本的技能一个工具**（`skill_<名字>`）—— **走统一确认闸**（默认 `high` 档）
+  - **自演化** `src/skills/autocreate.ts`（工具调用 ≥ 5 次才问 · 一轮最多建 1 个 ·
+    同技能 24 小时冷却 · 写盘前过安全检查）
+  - `/skills` 斜杠命令列出已装技能
+- **成本与预算（已跑通）**：
+  - 表 `cost_logs`（迁移 `src/migrations/003-init-cost-logs.ts`）·
+    服务 `src/services/cost.ts`（记账 · 月度分桶 · 预算闸）·
+    单价表 `data/pricing.json`
+  - `/usage` 斜杠命令 · `yarn cost:report`
 - 文档：26 份（01 ~ 13，含子文档）+ 本文件 + README
 
-**未交付**：A5 · B9 ~ B11 · **C2 的 1c 批次**（浏览器 / 沙箱代码 / 媒体）·
-C4 · C5 · D1 ~ D4。
+**未交付**：**C2 的 1c 批次**（浏览器 / 沙箱代码 / 媒体）·
+**B10**（子代理）· **B11**（定时任务）· **C5**（MCP）。
+（**B8 / C6 / E4 / A2 / A3 / A4 / B1 / B3 / B5 / B7 还差几条验收项**）
 
 ---
 

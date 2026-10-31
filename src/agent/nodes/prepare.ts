@@ -1,6 +1,12 @@
 import { RemoveMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { REMOVE_ALL_MESSAGES } from '@langchain/langgraph';
+import { logger } from '../../logger.js';
+import { messageText } from '../../services/chat-messages.js';
+import { buildMemorySection } from '../../services/memory/inject.js';
+import { buildRetrievalSection } from '../../services/search.js';
+import { prepareSessionContext } from '../../services/session-summary.js';
+import { buildSkillSection } from '../../skills/inject.js';
 import type { AtlasStateUpdate } from '../state.js';
 
 /**
@@ -13,12 +19,68 @@ import type { AtlasStateUpdate } from '../state.js';
  *
  * 📌 **`RemoveMessage(REMOVE_ALL_MESSAGES)` 是「清空再写」** ——
  * `messagesStateReducer` 认这个哨兵：它之前的全丢，它之后的留下。
+ *
+ * 📌 **上下文三件套也在这一步算好**（**每轮只算一次**）：
+ * - **摘要** —— 边界之前的历史折成一段，原文不再进上下文
+ * - **记忆** —— 召回的长期记忆，带用量表头
+ * - **检索** —— 跨会话检索的摘要（要调一次模型，放节点里就不会重复调）
  */
-export function prepareNode(state: {
+
+/** 最后一条用户消息（**拿它做相关度排序的查询**） */
+function lastUserText(messages: BaseMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i];
+    if (message?.getType() === 'human') return messageText(message);
+  }
+  return '';
+}
+
+export async function prepareNode(state: {
   turnMessages: BaseMessage[];
-}): AtlasStateUpdate {
+  sessionId?: string | undefined;
+}): Promise<AtlasStateUpdate> {
+  // ── 摘要与裁剪 ──
+  let messages = state.turnMessages;
+  let summary = '';
+  if (state.sessionId) {
+    try {
+      const context = await prepareSessionContext(state.sessionId, state.turnMessages);
+      messages = context.messages;
+      summary = context.summary;
+    } catch (err) {
+      // ⚠️ **压缩失败不影响对话** —— 按原样送进去
+      logger.warn({ err, sessionId: state.sessionId }, '准备会话上下文失败 —— 按原样继续');
+    }
+  }
+
+  const query = lastUserText(messages);
+
+  // ── 记忆召回（**同步、零成本**） ──
+  let memories = '';
+  try {
+    memories = buildMemorySection(query);
+  } catch (err) {
+    logger.warn({ err }, '召回记忆失败 —— 跳过这一段');
+  }
+
+  // ── 跨会话检索（**要调一次模型** —— 没命中就不调） ──
+  let retrieval = '';
+  try {
+    retrieval = await buildRetrievalSection(query);
+  } catch (err) {
+    logger.warn({ err }, '跨会话检索失败 —— 跳过这一段');
+  }
+
+  // ── 技能匹配（**走 FTS5** —— 命中的技能正文进上下文） ──
+  let skills = '';
+  try {
+    skills = await buildSkillSection(query);
+  } catch (err) {
+    logger.warn({ err }, '技能匹配失败 —— 跳过这一段');
+  }
+
   return {
-    messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...state.turnMessages],
+    messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...messages],
     executedToolCalls: [],
     lastToolName: null,
     lastToolCount: 0,
@@ -26,5 +88,9 @@ export function prepareNode(state: {
     steps: 0,
     haltReason: null,
     notice: null,
+    summary,
+    memories,
+    retrieval,
+    skills,
   };
 }

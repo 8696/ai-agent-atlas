@@ -50,10 +50,28 @@ export function messageText(message: BaseMessage): string {
 export function toLangChainMessages(messages: IncomingUiMessage[]): BaseMessage[] {
   const out: BaseMessage[] = [];
   for (const message of messages) {
+    // ⚠️ **命令结果不进模型上下文** ——
+    //    它是「用户敲了个 /help 的回执」，不是模型轮次
+    //    （见 [12-b B9](../docs/12-b-需求-对话与编排.md)）。
+    if (isCommandResult(message)) continue;
+
     const text = extractText(message.parts);
-    if (message.role === 'system') out.push(new SystemMessage(text));
-    else if (message.role === 'assistant') out.push(new AIMessage(text));
-    else out.push(new HumanMessage(text));
+    // 📌 **带上消息 id** —— 摘要边界靠 id 定位（按下标裁会裁错）
+    const id = message.id?.trim();
+    const extra = id ? { id } : {};
+    if (message.role === 'system') out.push(new SystemMessage({ content: text, ...extra }));
+    else if (message.role === 'assistant') out.push(new AIMessage({ content: text, ...extra }));
+    else out.push(new HumanMessage({ content: text, ...extra }));
   }
   return out;
+}
+
+/**
+ * 这条消息是不是**命令结果**。
+ *
+ * 📌 **靠 `data-command` part 认** —— 命令结果同时带正文与标记 part，
+ * 前端照常渲染正文，只是多一个「命令」标签。
+ */
+export function isCommandResult(message: IncomingUiMessage): boolean {
+  return message.parts.some((part) => part.type === 'data-command');
 }

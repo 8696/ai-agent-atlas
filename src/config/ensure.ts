@@ -4,11 +4,13 @@ import { DIRS, FILES } from './paths.js';
 import {
   CRON_FILE_TEMPLATE,
   DEFAULT_MEMORY_PROMPT,
+  DEFAULT_SKILL_PROMPT,
   DEFAULT_SOUL,
   DEFAULT_SUMMARY_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TOOL_PROMPT,
   MEMORY_FILE_TEMPLATE,
+  PRICING_FILE_TEMPLATE,
   USER_FILE_TEMPLATE,
 } from '../prompts/defaults.js';
 
@@ -50,6 +52,7 @@ export function ensureFiles(): EnsureResult {
     [join(DIRS.prompts, 'tool.md'), DEFAULT_TOOL_PROMPT],
     [join(DIRS.prompts, 'memory.md'), DEFAULT_MEMORY_PROMPT],
     [join(DIRS.prompts, 'summary.md'), DEFAULT_SUMMARY_PROMPT],
+    [join(DIRS.prompts, 'skill.md'), DEFAULT_SKILL_PROMPT],
     [FILES.soul, DEFAULT_SOUL],
   ];
   for (const [path, content] of promptFiles) {
@@ -61,6 +64,7 @@ export function ensureFiles(): EnsureResult {
     [join(DIRS.memory, 'MEMORY.md'), MEMORY_FILE_TEMPLATE],
     [join(DIRS.memory, 'USER.md'), USER_FILE_TEMPLATE],
     [FILES.cron, CRON_FILE_TEMPLATE],
+    [FILES.pricing, PRICING_FILE_TEMPLATE],
   ];
   for (const [path, content] of runtimeFiles) {
     if (writeIfMissing(path, content)) created.push(path);

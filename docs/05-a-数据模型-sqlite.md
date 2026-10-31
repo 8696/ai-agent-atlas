@@ -127,15 +127,22 @@
 
 | 虚表           | 索引什么                                     | 同步方式                                 |
 | -------------- | -------------------------------------------- | ---------------------------------------- |
-| `messages_fts` | 会话消息正文（`messages.content`）           | 写消息时同步 insert                      |
+| `messages_fts` | 会话消息正文（`messages.content`）           | **触发器**（insert / update / delete）   |
 | `memory_fts`   | 记忆条目（从 `data/memory/*.md` 解析进来的） | 记忆文件变更时重建（量小，全量重建即可） |
+
+> 📌 **消息表用触发器同步** —— 消息要走 `create` / `update` / `destroy`
+> 好几条路径，触发器是唯一「不会漏」的做法
+> （`messages_fts_ai` / `_au` / `_ad`）。
+> ⚠️ **虚表与消息表按 `rowid` 对齐** —— 触发器里写 `new.rowid`。
 
 - ⚠️ **分词器用 `tokenize='trigram'`**（SQLite ≥ 3.34）：
   默认的 `unicode61` **不切中文** —— 一整句中文会被当成一个 token，
   搜「跑一下测试」搜不到「我今天跑了一下单元测试」
 - ⚠️ **trigram 的代价**：查询词 **≥ 3 字符**；英文按 3 字符滑窗匹配（能用但慢）
-- ⚠️ **启动时探测可用性**（`pragma_compile_options()` 里查 `ENABLE_FTS5`）——
+- ⚠️ **启动时探测可用性** —— ⚠️ **建一张临时虚表再删掉**
+  （比查 `pragma_compile_options()` 准：有些编译没把 FTS5 写进编译选项）——
   不可用就**退回「时间倒序取最近 N 条」**，功能少一半但**不影响对话**
+  （实现见 `src/lib/fts.ts` 的 `probeFts()`）
 - 索引表只存文本，**不存向量**
 
 ### 图检查点表（`graph_checkpoints` + `graph_checkpoint_writes`）
@@ -195,15 +202,16 @@
 | 字段                | 类型     | 说明                                                |
 | ------------------- | -------- | --------------------------------------------------- |
 | `id`                | TEXT PK  |                                                     |
-| `session_id`        | TEXT     |                                                     |
-| `provider`          | TEXT     |                                                     |
+| `session_id`        | TEXT     | 所属会话（**摘要 / 检索可能没有**）                |
+| `message_id`        | TEXT     | 发起这次调用的 assistant 消息 id                    |
+| `provider`          | TEXT     | 供应商（**兼容端点也记成 anthropic**）              |
 | `model`             | TEXT     |                                                     |
-| `usage_scope`       | TEXT     | `chat` / `memory` / `summary` / `subagent` / `cron` |
+| `usage_scope`       | TEXT     | `chat` / `memory` / `summary` / `retrieval` / `subagent` / `cron` |
 | `prompt_tokens`     | INTEGER  |                                                     |
 | `completion_tokens` | INTEGER  |                                                     |
 | `reasoning_tokens`  | INTEGER  | ⚠️ 推理模型的思考 token **全额算输出**              |
-| `cached_tokens`     | INTEGER  |                                                     |
-| `cost`              | REAL     | 按当时价格算出来的钱                                |
+| `cached_tokens`     | INTEGER  | 命中缓存的输入 token（**不重复计费**）              |
+| `cost`              | REAL     | 按当时价格算出来的钱（**单价没配就是 0**）          |
 | `created_at`        | DATETIME |                                                     |
 
 索引：`idx_cost_logs_session (session_id, created_at)`、`idx_cost_logs_created (created_at)`。

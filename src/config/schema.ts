@@ -117,6 +117,10 @@ export const envSchema = z.object({
   /** ⚠️ 沉淀技能所需的**最少工具调用次数**（对齐 Hermes 的 5+ 次门槛）——
    *  闲聊（0 次工具调用）不该沉淀技能 */
   SKILL_MIN_TOOL_CALLS: z.coerce.number().int().nonnegative().default(5),
+  /** 每轮最多注入几个技能（**按相关度取前 N**） */
+  SKILL_TOP_K: z.coerce.number().int().positive().default(3),
+  /** 注入技能说明的 token 预算（**超了就不注入下一条**） */
+  SKILL_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
 
   // ── 日志 ──────────────────────────────────────────────
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),

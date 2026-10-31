@@ -117,6 +117,22 @@ function toBlocks(message: UIMessage): Block[] {
   return blocks;
 }
 
+/**
+ * 这条消息是不是**斜杠命令的结果**。
+ *
+ * 📌 **命令结果带一个 `data-command` part** —— 正文照常渲染，
+ * 只是上面多一个「命令」标签（见 [12-b B9](../docs/12-b-需求-对话与编排.md)）。
+ */
+function commandOf(message: UIMessage): { name: string; action?: string } | null {
+  for (const part of message.parts) {
+    if (part.type !== 'data-command') continue;
+    const data = part.data as { command?: string; action?: string } | undefined;
+    if (!data?.command) continue;
+    return { name: data.command, ...(data.action ? { action: data.action } : {}) };
+  }
+  return null;
+}
+
 function Caret() {
   return <span className="atlas-caret" aria-hidden />;
 }
@@ -211,6 +227,7 @@ export function MessageList({
         const streaming = status === 'streaming' && message.id === lastAssistantId;
         const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
         const blocks = toBlocks(message);
+        const command = commandOf(message);
 
         if (isUser) {
           return (
@@ -229,6 +246,7 @@ export function MessageList({
               A
             </div>
             <div className="atlas-ai-body">
+              {command ? <div className="atlas-cmd-badge">命令 /{command.name}</div> : null}
               <ThinkingTrace text={reasoning} live={reasoningLive} />
               {blocks.map((block, index) => {
                 if (block.kind === 'tool') {

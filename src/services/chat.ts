@@ -21,13 +21,58 @@ import { waitForDecision, type PendingDecision } from './pending-confirm.js';
 
 export type { IncomingUiMessage } from './chat-messages.js';
 
+/**
+ * 正在跑的会话流（**`/stop` 要用它**）。
+ *
+ * 📌 **按会话 id 登记** —— 一个会话同一时刻只有一条流。
+ */
+const activeStreams = new Map<string, AbortController>();
+
+/** 登记一条在跑的流 */
+export function registerSessionStream(sessionId: string, controller: AbortController): void {
+  activeStreams.set(sessionId, controller);
+}
+
+/** 注销一条流（**结束时要清掉** —— 不然 map 会越攒越多） */
+export function unregisterSessionStream(sessionId: string): void {
+  activeStreams.delete(sessionId);
+}
+
+/**
+ * 停掉某个会话正在跑的流（**`/stop` 用**）。
+ *
+ * @returns 有没有真的停掉
+ */
+export function stopSessionStream(sessionId: string): boolean {
+  const controller = activeStreams.get(sessionId);
+  if (!controller) return false;
+  controller.abort();
+  activeStreams.delete(sessionId);
+  return true;
+}
+
 /** 一轮对话的事件（**图事件的最小形状**） */
 export type ChatEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-call'; card: ToolCard }
   | { type: 'pending-confirm'; payload: PendingConfirm }
-  | { type: 'notice'; text: string };
+  | { type: 'notice'; text: string }
+  | { type: 'command'; payload: CommandEventPayload };
+
+/**
+ * 斜杠命令的结果（**不经过图** —— 直接在网关里产生）。
+ *
+ * 📌 **零 LLM 调用** —— 命令是用户敲的，不是模型说的。
+ */
+export interface CommandEventPayload {
+  /** 命令名（**不含斜杠**） */
+  command: string;
+  /** 前端接下来要做什么 */
+  action?: string;
+  /** 机器可读载荷 */
+  data?: unknown;
+}
 
 export interface ChatTurnOptions {
   /** 前端发来的历史消息（**恢复模式不用传**） */
@@ -99,8 +144,7 @@ export async function* streamChatTurn(options: ChatTurnOptions): AsyncGenerator<
       }
       if (mode === 'values' && isInterrupted(payload)) {
         const list = (payload as Record<string, unknown>).__interrupt__ as
-          | Array<{ value?: unknown }>
-          | undefined;
+          Array<{ value?: unknown }> | undefined;
         const value = list?.[0]?.value as PendingConfirm | undefined;
         if (value) interrupted = value;
       }
@@ -114,9 +158,7 @@ export async function* streamChatTurn(options: ChatTurnOptions): AsyncGenerator<
     //
     // ⚠️ **每一次挂起都要登记** —— 一轮里可能有**第二个**危险工具，
     //    那一次也要能等用户点（否则会永远挂着）
-    const waiters: Array<Promise<PendingDecision>> = [
-      waitForDecision(threadId, interrupted),
-    ];
+    const waiters: Array<Promise<PendingDecision>> = [waitForDecision(threadId, interrupted)];
     const aborted = abortRace(options.signal);
     if (aborted) waiters.push(aborted);
 
@@ -141,9 +183,7 @@ export async function* streamChatTurn(options: ChatTurnOptions): AsyncGenerator<
  * 📌 **重启后恢复时用** —— 续跑的是**同一条消息**，
  * 不会因为重启多出一条（见 [12-b B6](../docs/12-b-需求-对话与编排.md)）。
  */
-export async function getPendingTurnMessageId(
-  sessionId: string,
-): Promise<string | undefined> {
+export async function getPendingTurnMessageId(sessionId: string): Promise<string | undefined> {
   try {
     const graph = getGraph();
     const snapshot = await graph.getState({ configurable: { thread_id: sessionId } });

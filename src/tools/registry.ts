@@ -1,6 +1,8 @@
 import { tool as makeTool } from '@langchain/core/tools';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { getSkills } from '../skills/store.js';
+import { skillToolGroups } from '../skills/tools.js';
 import { fsTools } from './builtin/fs.js';
 import { httpTools } from './builtin/http.js';
 import { shellTools } from './builtin/shell.js';
@@ -105,8 +107,18 @@ export function builtinToolGroups(): ToolGroup[] {
   ];
 }
 
+/**
+ * 全部工具组 —— **内置 + 技能**（见 [12-c C4](../docs/12-c-需求-工具技能与扩展.md)）。
+ *
+ * 📌 **技能工具走同一套权限闸** —— 技能脚本能执行任意代码，
+ * 所以默认 `high` 档，**不能绕过确认**。
+ */
+export function allToolGroups(): ToolGroup[] {
+  return [...builtinToolGroups(), ...skillToolGroups(getSkills())];
+}
+
 /** 建一个注册表 */
-export function buildRegistry(groups: ToolGroup[] = builtinToolGroups()): ToolRegistry {
+export function buildRegistry(groups: ToolGroup[] = allToolGroups()): ToolRegistry {
   const tools = mergeToolGroups(groups);
   const byName = new Map(tools.map((item) => [item.name, item]));
   return {
@@ -118,16 +130,36 @@ export function buildRegistry(groups: ToolGroup[] = builtinToolGroups()): ToolRe
 
 let cached: ToolRegistry | undefined;
 
+/** 上次建池时的技能指纹（**技能变了就重建**） */
+let cachedFingerprint = '';
+
+/** 技能集合的指纹 —— **名字 + 脚本数 + 是否启用** */
+function skillFingerprint(): string {
+  try {
+    return getSkills()
+      .map((skill) => `${skill.meta.name}:${skill.scripts.length}:${skill.meta.enabled ? 1 : 0}`)
+      .join(',');
+  } catch {
+    // ⚠️ **扫不出技能就让指纹变化** —— 重建时会把真正的错误抛出来
+    return 'invalid';
+  }
+}
+
 /**
  * 全局注册表（**进程内缓存一份**）。
  *
  * ⚠️ **改描述要重启才生效** —— 描述不要缓存到「下一次调用」，
  * 但进程内缓存是允许的（文档要求「改描述立即生效」指的是**下一轮对话**，
  * 而改代码本来就要重启）。
+ *
+ * 📌 **技能变了会自动重建** —— 新建的技能立刻能拿到它的脚本工具，
+ * 不用等重启（技能**说明**的注入仍然是「下一轮对话」生效）。
  */
 export function getToolRegistry(): ToolRegistry {
-  if (!cached) {
+  const fingerprint = skillFingerprint();
+  if (!cached || fingerprint !== cachedFingerprint) {
     cached = buildRegistry();
+    cachedFingerprint = fingerprint;
     logger.info(
       { count: cached.list().length, tools: cached.names() },
       '工具池已就绪',

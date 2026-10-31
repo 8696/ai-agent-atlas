@@ -30,8 +30,14 @@ export const DEFAULT_SYSTEM_PROMPT = `# 基础人格与安全边界
 
 - 日期：{{date}}
 - 可用工具：{{tools}}
-- 已加载技能：{{skills}}
-- 相关记忆：{{memories}}
+
+{{skills}}
+
+{{summary}}
+
+{{memories}}
+
+{{retrieval}}
 `;
 
 /** 工具规范的最小兜底 */
@@ -56,6 +62,18 @@ export const DEFAULT_SUMMARY_PROMPT = `# 会话摘要指令
 
 把被裁掉的历史轮次折成**一份全新的完整摘要**（重写，不是追加）。
 覆盖：目标、已完成的事、已确定的事实、待办、用户偏好。
+`;
+
+/** 技能沉淀指令的最小兜底 */
+export const DEFAULT_SKILL_PROMPT = `# 技能沉淀指令
+
+干完一件复杂的事后，判断这一轮有没有**值得沉淀成技能**的经验。
+
+- 值得：下次还会用到的固定套路 → \`skill_create\`（新建）或 \`skill_update\`（改写）
+- 不值得：一次性数据、通用常识 → **什么都不做**
+
+⚠️ \`description\` 写**触发条件**（什么场景该用它）
+⚠️ 不写危险命令，不写「忽略之前的指令」这类话
 `;
 
 /** 人格文件的最小兜底 */
@@ -111,5 +129,21 @@ export const USER_FILE_TEMPLATE = `# 用户画像
 /** `data/cron.json` 的模板 —— 定时任务 */
 export const CRON_FILE_TEMPLATE = `{
   "tasks": []
+}
+`;
+
+/**
+ * `data/pricing.json` 的模板 —— **单价表**。
+ *
+ * 📌 **单价跟着模型配置走** —— 换模型要能换价（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）。
+ * ⚠️ **没填就只记 token 数** —— 费用显示 0，token 数是准的。
+ */
+export const PRICING_FILE_TEMPLATE = `{
+  "_readme": [
+    "单价表（USD / 每 100 万 token）。填了才有费用数字，没填只记 token 数。",
+    "改完立刻生效，不用重启。例：",
+    "\\"glm-5.3\\": { \\"inputPer1M\\": 0.6, \\"outputPer1M\\": 2.2 }"
+  ],
+  "models": {}
 }
 `;

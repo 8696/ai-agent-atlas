@@ -1,6 +1,7 @@
 import { Sequelize } from 'sequelize-typescript';
 import { paths } from './config.js';
 import { AuditLog, auditLogAttributes } from './models/audit-log.model.js';
+import { CostLog, costLogAttributes } from './models/cost-log.model.js';
 import { Message, messageAttributes } from './models/message.model.js';
 import { Session, sessionAttributes } from './models/session.model.js';
 import { ToolCallLog, toolCallLogAttributes } from './models/tool-call-log.model.js';
@@ -48,6 +49,11 @@ ToolCallLog.initialize(toolCallLogAttributes, {
 AuditLog.initialize(auditLogAttributes, {
   sequelize,
   tableName: 'audit_logs',
+  timestamps: false,
+});
+CostLog.initialize(costLogAttributes, {
+  sequelize,
+  tableName: 'cost_logs',
   timestamps: false,
 });
 

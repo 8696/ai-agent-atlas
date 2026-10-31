@@ -72,6 +72,8 @@ export const FILES = {
   database: resolvePath('data/atlas.db'),
   /** 定时任务 */
   cron: resolvePath('data/cron.json'),
+  /** 单价表（USD / 每 100 万 token）—— 换模型要能换价 */
+  pricing: resolvePath('data/pricing.json'),
   /** 环境变量文件 —— ⚠️ **不读 cwd 下的** */
   env: resolvePath('.env'),
   envExample: resolvePath('.env.example'),

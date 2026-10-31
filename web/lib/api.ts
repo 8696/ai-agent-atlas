@@ -160,6 +160,35 @@ export async function toggleMessageFavorite(
   return data;
 }
 
+/* ── 斜杠命令（见 [12-b B9](../../docs/12-b-需求-对话与编排.md)） ───────────────── */
+
+/** 一条命令的说明 */
+export interface CommandInfo {
+  /** 命令名（不含斜杠） */
+  name: string;
+  /** 用法 */
+  usage: string;
+  /** 一句话说明 */
+  summary: string;
+}
+
+/** 命令清单响应（**前端补全用**） */
+export interface CommandsResponse {
+  commands: CommandInfo[];
+  /** 已安装的技能名 */
+  skills: string[];
+  /** 可用的人格文件 */
+  personalities: string[];
+}
+
+/**
+ * 拉命令清单（**只用来做补全** —— 命令在服务端解析）。
+ */
+export async function fetchCommands(): Promise<CommandsResponse> {
+  const { data } = await api.get<CommandsResponse>('/commands');
+  return data;
+}
+
 /* ── 人工确认闸（见 [12-b B5](../../docs/12-b-需求-对话与编排.md)） ───────────── */
 
 /** 确认结果 */
