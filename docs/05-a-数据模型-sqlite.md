@@ -48,8 +48,13 @@
 | `favorite`     | INTEGER  | 0/1（消息级收藏）                                         |
 | `metadata`     | TEXT     | JSON：`created_at` / `model` / `usage` / `stop_reason` 等 |
 | `created_at`   | DATETIME |                                                           |
+| `updated_at`   | DATETIME |                                                           |
 
-索引：`idx_messages_session (session_id, created_at)`。
+索引：`idx_messages_session (session_id, created_at)`、`idx_messages_favorite (favorite)`。
+
+> ⚠️ **`messages` 没有自增序号列** —— 排序靠 `created_at`。
+> 所以 `utcNow()` 是**进程内单调递增**的（同一毫秒里多次调用各差 1 毫秒），
+> 否则同一毫秒插入的多条消息排序会不稳（见 [§5.3](#53-时间与时区约定-)）。
 
 > ⚠️ **`parts` 是「刷新后卡片还在」的依据**：前端渲染工具卡片读的是落库的 `parts`，
 > 不是重新拉一次执行记录。改 part 结构要同时改前端渲染分支。
@@ -210,6 +215,12 @@ evaluation_*
 
 > ⚠️ **库里没有配置表，也没有账号表** ——
 > 配置在代码 / 配置文件里（见 §5.1「配置不在库里」），本期无鉴权、单用户。
+>
+> ⚠️ **模型不用装饰器**（`src/models/*.model.ts` 的列定义是普通对象）——
+> 装饰器要靠 tsconfig 的 `experimentalDecorators` 才能编译，
+> 而 tsx 是**按 cwd 找 tsconfig** 的：从别的目录启动会直接编译失败
+> （见 [12-a A1](./12-a-需求-应用外壳与上下文.md)「从任何目录启动都指向同一份数据」）。
+> 列定义由 `src/db.ts` 调 `Model.initialize()` 挂上。
 
 ## 5.3 时间与时区约定 ⚠️
 
@@ -220,6 +231,10 @@ evaluation_*
 - 症状参考：「今日对话数在每天的前 8 小时恒为 0」—— 日期桶按本地时间切、
   库里按 UTC 存，差 8 小时
 - 走 ORM 的参数化查询不受影响（绑定的是 UTC 值）
+- 📌 **写时间的唯一入口是 `src/lib/time.ts` 的 `utcNow()`** ——
+  它**进程内单调递增**（同一毫秒多次调用各差 1 毫秒），
+  这样 `messages` 表在没有自增序号列的情况下排序也是稳的
+- ⚠️ **定宽 → 字典序 = 时间序** —— `ORDER BY created_at DESC` 直接可用，索引也吃得到
 
 ## 5.4 敏感数据处理
 

@@ -1,5 +1,7 @@
 import { Sequelize } from 'sequelize-typescript';
 import { paths } from './config.js';
+import { Message, messageAttributes } from './models/message.model.js';
+import { Session, sessionAttributes } from './models/session.model.js';
 
 /**
  * 业务库连接（SQLite）。
@@ -13,6 +15,28 @@ export const sequelize = new Sequelize({
   storage: paths.databaseFile,
   logging: false,
   pool: { max: 1, min: 0, idle: 10_000 },
+});
+
+/**
+ * ⚠️ **模型必须挂上** —— 忘了挂的话第一次 `.findAll()` 才崩（见 AGENTS.md §4.2）。
+ *
+ * 📌 **在这里显式 `initialize`，不用装饰器**：
+ * 装饰器要靠 tsconfig 的 `experimentalDecorators` 才能编译，
+ * 而 tsx 是**按 cwd 找 tsconfig** 的 —— 从 `/tmp` 启动就找不到，
+ * 装饰器会直接编译失败（见 [12-a A1](./docs/12-a-需求-应用外壳与上下文.md)）。
+ *
+ * ⚠️ **用 `initialize` 不是 `init`** —— sequelize-typescript 的 `init` 代理会
+ * 在模型标记为已初始化之前就去问表名，直接抛「Model not initialized」。
+ */
+Session.initialize(sessionAttributes, {
+  sequelize,
+  tableName: 'sessions',
+  timestamps: false,
+});
+Message.initialize(messageAttributes, {
+  sequelize,
+  tableName: 'messages',
+  timestamps: false,
 });
 
 export async function initDatabase(): Promise<void> {

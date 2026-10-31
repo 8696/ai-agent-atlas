@@ -33,6 +33,13 @@ const REASONING_PART_ID = 'reasoning';
 export interface ChatEventStreamOptions {
   /** 领域事件流 */
   events: AsyncIterable<ChatEvent>;
+  /**
+   * assistant 消息的 id（**服务端生成**）。
+   *
+   * ⚠️ **为什么要后端给 id**：前端要靠它把「这条消息」和「库里那条消息」对上 ——
+   * 消息级收藏（📌）点的是消息 id，两边不一致就收藏不到刚生成的那条。
+   */
+  messageId?: string | undefined;
 }
 
 /**
@@ -44,7 +51,7 @@ export interface ChatEventStreamOptions {
 export async function* createChatEventStream(
   options: ChatEventStreamOptions,
 ): AsyncGenerator<UIMessageChunk> {
-  yield { type: 'start' };
+  yield options.messageId ? { type: 'start', messageId: options.messageId } : { type: 'start' };
   yield { type: 'start-step' };
 
   let textStarted = false;
@@ -92,4 +99,82 @@ export function describeError(error: unknown): string {
   const raw =
     error instanceof Error ? error.message : typeof error === 'string' ? error : '未知错误';
   return sanitizeMessage(raw);
+}
+
+/**
+ * 落库的 part —— **与推给前端的是同一份**。
+ *
+ * ⚠️ **同源是硬要求**（见 [12-b B1](../docs/12-b-需求-对话与编排.md)）：
+ * 落库的 parts 与推给前端的如果不是同一份，
+ * 刷新后卡片内容就会变（用户看到「刷新一下答案不一样」）。
+ */
+export interface PersistedPart {
+  type: 'text' | 'reasoning';
+  text: string;
+  state: 'done';
+  /** 思考块的 id（前端渲染按 id 分块） */
+  id?: string;
+}
+
+/** part 累加器 —— **吃的是往 SSE 写出去的同一批 chunk** */
+export interface PartsAccumulator {
+  add: (chunk: UIMessageChunk) => void;
+  /** 攒出来的 parts（**顺序 = 出现顺序**） */
+  parts: () => PersistedPart[];
+  /** 正文纯文本 */
+  text: () => string;
+}
+
+interface PartSlot {
+  kind: 'text' | 'reasoning';
+  id: string;
+  text: string;
+}
+
+/**
+ * 建一个 part 累加器。
+ *
+ * 📌 **用法**：网关里每写一个 chunk 就 `add(chunk)` 一下，
+ * 流结束后 `parts()` 拿去落库 —— 落库内容与用户看到的**逐字一致**。
+ */
+export function createPartsAccumulator(): PartsAccumulator {
+  const slots: PartSlot[] = [];
+
+  const ensure = (kind: PartSlot['kind'], id: string): PartSlot => {
+    const found = slots.find((slot) => slot.kind === kind && slot.id === id);
+    if (found) return found;
+    const created: PartSlot = { kind, id, text: '' };
+    slots.push(created);
+    return created;
+  };
+
+  return {
+    add(chunk: UIMessageChunk): void {
+      if (chunk.type === 'text-start') {
+        ensure('text', chunk.id);
+      } else if (chunk.type === 'text-delta') {
+        ensure('text', chunk.id).text += chunk.delta;
+      } else if (chunk.type === 'reasoning-start') {
+        ensure('reasoning', chunk.id);
+      } else if (chunk.type === 'reasoning-delta') {
+        ensure('reasoning', chunk.id).text += chunk.delta;
+      }
+      // ⚠️ `text-end` / `reasoning-end` 只是收尾 —— 内容已经在 delta 里攒好了
+    },
+    parts(): PersistedPart[] {
+      return slots
+        .filter((slot) => slot.text.length > 0)
+        .map((slot) =>
+          slot.kind === 'reasoning'
+            ? { type: 'reasoning', text: slot.text, state: 'done', id: slot.id }
+            : { type: 'text', text: slot.text, state: 'done' },
+        );
+    },
+    text(): string {
+      return slots
+        .filter((slot) => slot.kind === 'text')
+        .map((slot) => slot.text)
+        .join('');
+    },
+  };
 }

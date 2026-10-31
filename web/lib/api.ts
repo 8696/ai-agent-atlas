@@ -41,3 +41,119 @@ export async function fetchHealth(): Promise<HealthResponse> {
   const { data } = await api.get<HealthResponse>('/health');
   return data;
 }
+
+/* ── 会话（见 [12-b B2](../../docs/12-b-需求-对话与编排.md)） ───────────────── */
+
+/** 会话摘要（**列表项与详情共用**） */
+export interface SessionSummary {
+  id: string;
+  title: string;
+  status: string;
+  /** 会话级收藏 */
+  favorite: boolean;
+  messageCount: number;
+  lastActiveAt: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/** 落库的 part（结构化卡片；后续工具卡片也走这里） */
+export interface StoredPart {
+  type: string;
+  text?: string;
+  state?: string;
+  id?: string;
+}
+
+/** 一条消息 */
+export interface StoredMessage {
+  id: string;
+  role: string;
+  content: string;
+  parts: StoredPart[];
+  /** 消息级收藏 */
+  favorite: boolean;
+  createdAt: string | null;
+}
+
+/** 列表响应 */
+export interface SessionListResponse {
+  items: SessionSummary[];
+  /** ⚠️ **筛选后的总数** —— 不是全库总数 */
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/** 详情响应 */
+export interface SessionDetailResponse {
+  session: SessionSummary;
+  messages: StoredMessage[];
+}
+
+export interface SessionQuery {
+  /** 标题关键词 */
+  q?: string;
+  /** 只看收藏 */
+  favorite?: boolean;
+  page?: number;
+  pageSize?: number;
+}
+
+/** 会话列表（**搜索与收藏筛选都在服务端做**） */
+export async function fetchSessions(query: SessionQuery = {}): Promise<SessionListResponse> {
+  const { data } = await api.get<SessionListResponse>('/sessions', {
+    params: {
+      ...(query.q ? { q: query.q } : {}),
+      ...(query.favorite ? { favorite: '1' } : {}),
+      ...(query.page ? { page: query.page } : {}),
+      ...(query.pageSize ? { pageSize: query.pageSize } : {}),
+    },
+  });
+  return data;
+}
+
+/** 新建会话（**空会话，标题等第一条消息落库时再定**） */
+export async function createSession(): Promise<SessionSummary> {
+  const { data } = await api.post<SessionSummary>('/sessions');
+  return data;
+}
+
+/** 会话详情 + 消息（**刷新页面回填用**） */
+export async function fetchSession(id: string): Promise<SessionDetailResponse> {
+  const { data } = await api.get<SessionDetailResponse>(`/sessions/${id}`);
+  return data;
+}
+
+/** 改名 */
+export async function renameSession(id: string, title: string): Promise<SessionSummary> {
+  const { data } = await api.patch<SessionSummary>(`/sessions/${id}`, { title });
+  return data;
+}
+
+/** 收藏（**不传 `favorite` = 切换**） */
+export async function toggleSessionFavorite(
+  id: string,
+  favorite?: boolean,
+): Promise<SessionSummary> {
+  const { data } = await api.patch<SessionSummary>(`/sessions/${id}/favorite`, {
+    ...(favorite === undefined ? {} : { favorite }),
+  });
+  return data;
+}
+
+/** 删会话（**级联删消息**） */
+export async function deleteSession(id: string): Promise<void> {
+  await api.delete(`/sessions/${id}`);
+}
+
+/** 消息级收藏（**不传 `favorite` = 切换**） */
+export async function toggleMessageFavorite(
+  id: string,
+  favorite?: boolean,
+): Promise<StoredMessage> {
+  const { data } = await api.patch<StoredMessage>(`/messages/${id}/favorite`, {
+    ...(favorite === undefined ? {} : { favorite }),
+  });
+  return data;
+}

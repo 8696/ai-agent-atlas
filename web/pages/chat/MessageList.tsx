@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Spin } from 'antd';
-import { ArrowRightOutlined } from '@ant-design/icons';
+import { Button, Spin } from 'antd';
+import { ArrowRightOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
 
@@ -12,12 +12,17 @@ import { Markdown } from '../../components/Markdown';
  * | 用户气泡 | 右对齐，浅色底                              |
  * | AI 气泡 | 左对齐，**不拉满整行**（拉满 = 一大块空白） |
  * | 重新生成 | 在**最后一条 AI 消息**上，**必须传 messageId** |
+ * | 📌 收藏 | 在 AI 消息右上角（**消息级收藏**，见 §4.2）   |
  */
 
 interface Props {
   messages: UIMessage[];
   status: ChatStatus;
+  /** 消息级收藏（**message id → 是否收藏**） */
+  favorites: Record<string, boolean>;
   onRegenerate: (messageId: string) => void;
+  /** 消息级收藏切换 */
+  onToggleFavorite: (messageId: string) => void;
   /** 点建议问题 → 直接发出去 */
   onPickSuggestion?: (text: string) => void;
 }
@@ -77,7 +82,14 @@ function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
   );
 }
 
-export function MessageList({ messages, status, onRegenerate, onPickSuggestion }: Props) {
+export function MessageList({
+  messages,
+  status,
+  favorites,
+  onRegenerate,
+  onToggleFavorite,
+  onPickSuggestion,
+}: Props) {
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
       const message = messages[i];
@@ -92,7 +104,7 @@ export function MessageList({ messages, status, onRegenerate, onPickSuggestion }
         <p className="atlas-kicker">Atlas</p>
         <h1>今天想做什么</h1>
         <p className="atlas-welcome-lead">
-          直接说话就行。它会调用已配置的模型回答你；工具和会话记录还没接上。
+          直接说话就行。它会调用已配置的模型回答你，对话会自动存进历史会话；工具还没接上。
         </p>
         <div className="atlas-suggests">
           {SUGGESTIONS.map((text) => (
@@ -145,15 +157,27 @@ export function MessageList({ messages, status, onRegenerate, onPickSuggestion }
                 </div>
               ) : null}
               {streaming && !text ? <Spin size="small" /> : null}
-              {!streaming && message.id === lastAssistantId ? (
-                <button
-                  type="button"
-                  className="atlas-redo"
-                  onClick={() => onRegenerate(message.id)}
-                >
-                  重新生成
-                </button>
-              ) : null}
+              <div className="atlas-ai-tools">
+                {/* 📌 消息级收藏（见 [04-b §4.2](../docs/04-b-ui-聊天页.md)） */}
+                <Button
+                  type="text"
+                  size="small"
+                  className="atlas-pin"
+                  aria-label={favorites[message.id] ? '取消收藏这条消息' : '收藏这条消息'}
+                  aria-pressed={favorites[message.id] === true}
+                  icon={favorites[message.id] ? <PushpinFilled /> : <PushpinOutlined />}
+                  onClick={() => onToggleFavorite(message.id)}
+                />
+                {!streaming && message.id === lastAssistantId ? (
+                  <button
+                    type="button"
+                    className="atlas-redo"
+                    onClick={() => onRegenerate(message.id)}
+                  >
+                    重新生成
+                  </button>
+                ) : null}
+              </div>
             </div>
           </article>
         );

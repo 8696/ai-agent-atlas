@@ -75,6 +75,8 @@ export const envSchema = z.object({
   SUMMARY_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
   TOOL_OUTPUT_MAX_CHARS: z.coerce.number().int().positive().default(4000),
   TOOL_OUTPUT_TRUNCATE: z.enum(['head', 'tail']).default('tail'),
+  /** 会话保留天数（超期连同消息一起清掉；收藏的会话不清） */
+  SESSION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 
   // ── 成本 ──────────────────────────────────────────────
   MONTHLY_TOKEN_BUDGET: z.coerce.number().int().positive().default(200_000),

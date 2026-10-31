@@ -38,8 +38,9 @@
 | 危险能力     | 有（Shell / 写文件 / 出网 / 浏览器）→ **必须有确认闸** | 基本没有            |
 | 扩展方向     | Skill · MCP · 长期记忆 · 多代理 · 定时任务     | 业务系统对接                 |
 
-**当前状态**：**阶段 0「先能聊」做了一半** —— 26 份规格文档已写完，
-**「打开网页就能跟模型对话」这条竖切已跑通**（A2 / A3 / A4 / B1 / B8 = 🟡，
+**当前状态**：**阶段 0「先能聊」快做完了** —— 26 份规格文档已写完，
+**「打开网页就能跟模型对话」这条竖切已跑通**，
+**会话也落库了**（A1 / B2 = ✅ · A2 / A3 / A4 / B1 / B8 = 🟡，
 见 [12-e §E5](./docs/12-e-需求-观测安全与验收.md)）。
 
 已就位的部分：
@@ -51,11 +52,17 @@
   - 后端 `POST /api/v1/chat`（SSE · AI SDK UI Message Stream）· `GET /api/v1/models` ·
     协议翻译 `src/agent/events.ts` · 编排 `src/services/chat.ts` · 提示词 `src/services/prompt.ts`
   - 前端 `/chat` 聊天页（`useChat` · 流式气泡 · Markdown · 思考模式 · 重试）·
-    应用外壳（侧栏 / 顶栏 / 深浅色 / 错误页）· `/sessions` 占位
+    应用外壳（侧栏 / 顶栏 / 深浅色 / 错误页）
+- **会话层（已跑通）**：
+  - 数据层 `sessions` + `messages` 两张表（迁移 `src/migrations/001-init-sessions.ts`）
+  - 服务 `src/services/session.ts`（CRUD / 搜索 / 分页 / 级联删除 / 保留期清理）·
+    `src/services/message.ts`（消息与 `parts` 落库 + **对账**）
+  - 网关 `/api/v1/sessions` · `/api/v1/messages/:id/favorite`
+  - 前端侧栏会话列表 · `/sessions` 历史会话页 · 聊天页会话感知（`?session=` / `?q=`）
 - 文档：26 份（01 ~ 13，含子文档）+ 本文件 + README
 
-**未交付**：A1（边界告警）· A5 · B2（会话落库）· **B3 ~ B6（LangGraph 图 / 工具循环 /
-人工确认闸 / 检查点）** · B7 · B9 ~ B11 · C1 ~ C6 · D1 ~ D4 · E4。
+**未交付**：A5 · **B3 ~ B6（LangGraph 图 / 工具循环 / 人工确认闸 / 检查点）** ·
+B7 · B9 ~ B11 · C1 ~ C6 · D1 ~ D4 · E4。
 
 ---
 

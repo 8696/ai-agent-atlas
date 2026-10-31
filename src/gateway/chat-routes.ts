@@ -2,11 +2,18 @@ import { once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import Router from '@koa/router';
 import { z } from 'zod';
-import { createChatEventStream, describeError } from '../agent/events.js';
+import { nanoid } from 'nanoid';
+import { createChatEventStream, createPartsAccumulator, describeError } from '../agent/events.js';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../logger.js';
 import { streamChatReply } from '../services/chat.js';
 import { resolveFallback, resolveModel } from '../services/model.js';
+import {
+  appendAssistantMessage,
+  applyTitleFromFirstUserMessage,
+  syncMessages,
+} from '../services/message.js';
+import { findSession, touchSession } from '../services/session.js';
 
 /**
  * 对话网关 —— `/api/v1/chat`（SSE）+ `/api/v1/models`。
@@ -44,6 +51,8 @@ const chatRequestSchema = z.object({
   messages: z.array(uiMessageSchema),
   trigger: z.string().optional(),
   messageId: z.string().optional(),
+  /** 会话 id（**前端建好会话后带进来**；没有就只聊天不落库） */
+  sessionId: z.string().optional(),
 });
 
 export const chatRouter = new Router({ prefix: '/api/v1' });
@@ -56,7 +65,7 @@ export const chatRouter = new Router({ prefix: '/api/v1' });
  */
 // ⚠️ **这个处理器本身是同步的** —— 它把响应流挂好就返回，
 //    真正的流式循环在下面的 `void (async () => {...})()` 里跑（不占着 Koa 的 Promise）。
-chatRouter.post('/chat', (ctx) => {
+chatRouter.post('/chat', async (ctx) => {
   const parsed = chatRequestSchema.safeParse(ctx.request.body);
   if (!parsed.success) {
     throw new AppError('INVALID_REQUEST', '请求体格式不对', 400);
@@ -69,6 +78,21 @@ chatRouter.post('/chat', (ctx) => {
       '还没配置模型，去改 .env 的 LLM_MODEL（改完重启后端）',
       503,
     );
+  }
+
+  const sessionId = parsed.data.sessionId;
+  if (sessionId) {
+    // ⚠️ **会话不存在就直接报错** —— 不静默新建一个，
+    //    否则用户删了会话再发消息会「复活」一条空会话
+    const session = await findSession(sessionId);
+    if (!session) {
+      throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+    }
+    // ⚠️ **先对账再开流** —— 库里与前端历史对齐（重新生成 = 删掉多余的行）
+    await syncMessages(sessionId, parsed.data.messages);
+    // ⚠️ **标题在这里定，不在流结束时定** ——
+    //    这样即使这一轮流失败了，会话也已经有能看懂的标题
+    await applyTitleFromFirstUserMessage(sessionId);
   }
 
   const abort = new AbortController();
@@ -103,9 +127,16 @@ chatRouter.post('/chat', (ctx) => {
   ctx.status = 200;
   ctx.body = stream;
 
+  // ⚠️ **落库的 parts 与推给前端的同源** —— 同一个累加器吃同一批 chunk
+  const parts = createPartsAccumulator();
+  // ⚠️ **assistant 消息 id 由服务端生成** —— 随 `start` chunk 推给前端，
+  //    落库用同一个 id，两边对得上（消息级收藏点得中刚生成的那条）
+  const assistantMessageId = nanoid();
+
   void (async () => {
     try {
-      for await (const chunk of createChatEventStream({ events })) {
+      for await (const chunk of createChatEventStream({ events, messageId: assistantMessageId })) {
+        parts.add(chunk);
         if (!stream.write(`data: ${JSON.stringify(chunk)}\n\n`)) {
           await once(stream, 'drain');
         }
@@ -125,6 +156,26 @@ chatRouter.post('/chat', (ctx) => {
         stream.write('data: [DONE]\n\n');
       }
       stream.end();
+
+      // ⚠️ **落库在流结束之后** —— 内容与用户看到的逐字一致
+      if (sessionId) {
+        try {
+          await appendAssistantMessage(sessionId, {
+            id: assistantMessageId,
+            content: parts.text(),
+            parts: parts.parts(),
+            metadata: { model: model.name },
+          });
+        } catch (err) {
+          // ⚠️ **落库失败不许打断对话** —— 用户已经看到回答了
+          logger.error({ err, sessionId }, 'failed to persist assistant message');
+        }
+        try {
+          await touchSession(sessionId);
+        } catch (err) {
+          logger.error({ err, sessionId }, 'failed to refresh session counters');
+        }
+      }
     }
   })();
 });

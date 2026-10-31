@@ -5,7 +5,9 @@ import cors from '@koa/cors';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { AppError, registerSecret } from './lib/errors.js';
+import { resolveCorsOrigin } from './lib/cors.js';
 import { chatRouter } from './gateway/chat-routes.js';
+import { sessionRouter } from './gateway/session-routes.js';
 
 /**
  * Koa 应用装配 —— **与「启动」分开**。
@@ -22,8 +24,10 @@ export function createApp(): Koa {
   registerSecret(config.LLM_FALLBACK_API_KEY);
 
   // 生产是同源部署 → 不挂 CORS 中间件；开发放开给 Vite
+  // ⚠️ **只放本机来源** —— 服务无鉴权且有 shell 权限，
+  //    放开成 `*` 等于让任意网页都能借用户浏览器驱动这个 Agent（见 [12-a A1](./docs/12-a-需求-应用外壳与上下文.md)）
   if (config.NODE_ENV !== 'production') {
-    app.use(cors({ origin: '*' }));
+    app.use(cors({ origin: resolveCorsOrigin }));
   }
   app.use(bodyParser());
   app.use(async (ctx, next) => {
@@ -60,6 +64,10 @@ export function createApp(): Koa {
   /** 对话与模型（`/api/v1/chat` · `/api/v1/models`） */
   app.use(chatRouter.routes());
   app.use(chatRouter.allowedMethods());
+
+  /** 会话与消息（`/api/v1/sessions` · `/api/v1/messages/:id/favorite`） */
+  app.use(sessionRouter.routes());
+  app.use(sessionRouter.allowedMethods());
 
   /** 健康检查（公开路由白名单之一） */
   app.use((ctx) => {
