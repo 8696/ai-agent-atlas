@@ -26,6 +26,7 @@ export type AuditAction =
   | 'CRON_TRIGGERED'
   | 'SUBAGENT_SPAWNED'
   | 'TOOL_APPROVED'
+  | 'TOOL_AUTO_APPROVED'
   | 'TOOL_REJECTED'
   | 'TOOL_BLOCKED'
   | 'TOOL_EXECUTED'

@@ -199,7 +199,8 @@ export function MessageList({
         <p className="atlas-kicker">Atlas</p>
         <h1>今天想做什么</h1>
         <p className="atlas-welcome-lead">
-          直接说话就行。它会调用已配置的模型回答你，对话会自动存进历史会话；工具还没接上。
+          直接说话就行。它会调用已配置的模型回答你，对话会自动存进历史会话；
+          也能调工具干活（危险操作会先问你）。
         </p>
         <div className="atlas-suggests">
           {SUGGESTIONS.map((text) => (

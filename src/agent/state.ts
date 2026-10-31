@@ -131,6 +131,37 @@ export const AtlasState = Annotation.Root({
   }),
 
   /**
+   * 步数上限（**子代理用自己的** —— 见 [12-b B10](./docs/12-b-需求-对话与编排.md)）。
+   *
+   * ⚠️ **不填就用全局的 `MAX_TOOL_STEPS`**。
+   */
+  maxSteps: Annotation<number>({
+    reducer: (_current, update) => update ?? 0,
+    default: () => 0,
+  }),
+
+  /**
+   * 隔离模式（**子代理专用**）。
+   *
+   * ⚠️ **为 true 时不加载主对话的历史与摘要** ——
+   *    子代理只拿得到「任务」这一条（见 [12-b B10](./docs/12-b-需求-对话与编排.md)）。
+   */
+  isolated: Annotation<boolean>({
+    reducer: (_current, update) => update ?? false,
+    default: () => false,
+  }),
+
+  /**
+   * 模型覆盖（**子代理可指定** —— 默认继承主模型）。
+   *
+   * ⚠️ **只认主模型与备用模型** —— 认不出来就用主模型。
+   */
+  model: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
+
+  /**
    * 已用预算（**累计，不因重启归零**）。
    *
    * ⚠️ **跨轮累计** —— 预算闸看的是「这个会话一共花了多少」。
@@ -171,6 +202,17 @@ export const AtlasState = Annotation.Root({
   sessionId: Annotation<string>({
     reducer: (_current, update) => update ?? '',
     default: () => '',
+  }),
+
+  /**
+   * 允许自动放行的工具名（**无人值守场景专用** —— 定时任务）。
+   *
+   * ⚠️ **高危** —— 列在这里的工具跳过人工确认闸。
+   * 只有用户在定时任务里显式写出来才生效（见 [12-b B11](./docs/12-b-需求-对话与编排.md)）。
+   */
+  autoApprove: Annotation<string[]>({
+    reducer: (_current, update) => update ?? [],
+    default: () => [],
   }),
 
   /**

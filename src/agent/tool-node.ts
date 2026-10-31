@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { interrupt } from '@langchain/langgraph';
+import { interrupt, isGraphInterrupt } from '@langchain/langgraph';
 import { config } from '../config.js';
 import { writeAudit } from '../lib/audit.js';
 import { logger } from '../logger.js';
@@ -8,6 +8,7 @@ import { scanInjection } from '../lib/security/injection.js';
 import { maskString, maskValue } from '../lib/security/mask.js';
 import { markUntrusted, truncateOutput } from '../tools/output.js';
 import { getToolRegistry, type ToolRegistry } from '../tools/registry.js';
+import { mcpPolicyLookup } from '../tools/mcp/manager.js';
 import type { ToolDefinition } from '../tools/types.js';
 import { recordToolCall } from '../services/tool-log.js';
 import type { AssembledToolCall } from './tool-calls.js';
@@ -103,6 +104,12 @@ export interface RunToolCallOptions {
   signal?: AbortSignal | undefined;
   /** 已被用户拒绝过的调用（**指纹集合**） */
   rejected?: ReadonlySet<string>;
+  /**
+   * 自动放行的工具（**无人值守场景** —— 定时任务里显式声明的）。
+   *
+   * ⚠️ **只跳过确认，不跳过硬禁** —— 被全局开关禁掉的工具照样跑不了。
+   */
+  autoApprove?: ReadonlySet<string>;
   /** 注册表（**测试可注入**） */
   registry?: ToolRegistry;
   /** 硬禁的工具（**如 `SHELL_ENABLED=false` 时的 `shell`**） */
@@ -192,6 +199,8 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
   const decision = decideTool(tool, {
     env: config,
     disabled: options.disabled ?? disabledTools(config),
+    // 📌 **MCP server 粒度策略** —— 第三方来源默认 `ask`（见 [12-c C5](../docs/12-c-需求-工具技能与扩展.md)）
+    mcpPolicy: mcpPolicyLookup,
   });
 
   if (decision.decision === 'blocked' || decision.decision === 'reject') {
@@ -219,7 +228,19 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
 
   // ── 人工确认闸 ──
   let requiresConfirmation = false;
-  if (decision.decision === 'await') {
+  // 📌 **自动放行名单**（无人值守场景 —— 定时任务显式声明的）
+  //    ⚠️ **只放行「await」** —— 被硬禁（blocked）的不受影响
+  const autoApproved = options.autoApprove?.has(tool.name) === true;
+  if (decision.decision === 'await' && autoApproved) {
+    logger.info(
+      { tool: tool.name, sessionId: options.sessionId },
+      '工具在自动放行名单里 —— 跳过人工确认',
+    );
+    await writeAudit('TOOL_AUTO_APPROVED', 'tool', tool.name, {
+      sessionId: options.sessionId,
+      toolCallId: call.id,
+    });
+  } else if (decision.decision === 'await') {
     requiresConfirmation = true;
     const payload = {
       toolCallId: call.id,
@@ -274,8 +295,14 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       ...(options.messageId ? { messageId: options.messageId } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
+      // 📌 **带上调用 id** —— 子代理靠它算稳定的 thread_id
+      toolCallId: call.id,
     });
   } catch (err) {
+    // ⚠️ **图中断不能吞** —— 它是「挂起等确认」的机制。
+    //    子代理要人工确认时，中断会一路冒泡到父图（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）；
+    //    吞掉就等于「子代理绕过确认」。
+    if (isGraphInterrupt(err)) throw err;
     const message = err instanceof Error ? err.message : String(err);
     const duration = Date.now() - started;
     await recordToolCall({

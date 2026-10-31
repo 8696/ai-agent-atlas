@@ -95,6 +95,8 @@ export async function planNode(
     skills?: string | undefined;
     sessionId?: string | undefined;
     messageId?: string | undefined;
+    isolated?: boolean | undefined;
+    model?: string | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): Promise<AtlasStateUpdate> {
@@ -118,13 +120,20 @@ export async function planNode(
       logger.warn({ err, sessionId: state.sessionId }, '读会话设置失败 —— 用全局配置');
     }
   }
+  // 📌 **子代理指定的模型优先** —— 只认主模型与备用模型（认不出来就用主模型）
+  if (state.model) {
+    sessionModel = pickSessionModel(primary, state.model);
+    thinkingBudget = sessionModel.thinkingBudget;
+  }
   const model: ResolvedModel = { ...sessionModel, thinkingBudget };
 
   // ── 工具池裁剪 ──
   const registry = getToolRegistry();
   const enabled = registry.list().filter((tool) => tool.enabled);
+  // ⚠️ **子代理不能派子代理** —— 防递归（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
+  const pool = state.isolated ? enabled.filter((tool) => tool.executor !== 'none') : enabled;
   const query = lastUserText(state.messages);
-  const selected = selectTools(enabled, query, config);
+  const selected = selectTools(pool, query, config);
 
   // ⚠️ **用户消息过注入检测** —— 命中只告警 + 收紧工具档，不直接拒答
   //    （见 [10 §10.7](../../docs/10-安全方案.md)）

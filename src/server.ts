@@ -4,11 +4,13 @@ import { initDatabase } from './db.js';
 import { createApp } from './app.js';
 import { describeBoundary } from './lib/boundary.js';
 import { getToolRegistry } from './tools/registry.js';
+import { initMcp } from './tools/mcp/manager.js';
 import { ensureFtsTables } from './lib/fts.js';
 import { syncMemoryIndex } from './services/memory/store.js';
 import { reloadSkills, syncSkillIndex } from './skills/store.js';
-import { auditConfigOnStartup } from './services/config-audit.js';
+import { auditConfigOnStartup, auditSkillInstalls } from './services/config-audit.js';
 import { purgeExpiredSessions } from './services/session.js';
+import { startCronScheduler, stopCronScheduler } from './services/cron/scheduler.js';
 
 /**
  * 打印服务边界提示（见 [12-a A1](./docs/12-a-需求-应用外壳与上下文.md)）。
@@ -40,11 +42,21 @@ async function main() {
       { count: skills.length, skills: skills.map((skill) => skill.meta.name) },
       '技能已加载',
     );
+    // 📌 **新装的技能记一条审计** —— 见 [12-e E4](./docs/12-e-需求-观测安全与验收.md)
+    await auditSkillInstalls(skills);
   } catch (err) {
     console.error(
       `\n[Atlas] 技能初始化失败：${err instanceof Error ? err.message : String(err)}\n`,
     );
     process.exit(1);
+  }
+
+  // ⚠️ **MCP 先连** —— 外部 server 的工具要进工具池，
+  //    连不上只记日志，不影响其它工具（见 [12-c C5](./docs/12-c-需求-工具技能与扩展.md)）
+  try {
+    await initMcp();
+  } catch (err) {
+    logger.error({ err }, 'MCP 初始化失败 —— 其它功能不受影响');
   }
 
   // ⚠️ **启动即校验工具池** —— 两个内置工具重名是代码错误，
@@ -93,9 +105,14 @@ async function main() {
     printBoundaryNotice();
   });
 
+  // 📌 **定时任务调度器** —— 每分钟检查一次到期任务
+  //    （见 [12-b B11](./docs/12-b-需求-对话与编排.md)）
+  startCronScheduler();
+
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
       logger.info({ signal }, 'shutting down');
+      stopCronScheduler();
       server.close(() => process.exit(0));
     });
   }

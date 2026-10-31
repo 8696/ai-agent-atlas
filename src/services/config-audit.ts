@@ -55,6 +55,28 @@ export async function auditConfigOnStartup(): Promise<void> {
   }
 }
 
+/**
+ * 技能安装审计 —— **扫到新技能目录就记一条 `SKILL_INSTALLED`**
+ * （见 [12-e E4](./docs/12-e-需求-观测安全与验收.md) 的审计清单）。
+ *
+ * ⚠️ **只记「第一次见到」的技能** —— 每次启动都写一遍会把审计表灌满，
+ * 那就等于没有审计了。
+ */
+export async function auditSkillInstalls(skills: Array<{ meta: { name: string } }>): Promise<void> {
+  for (const skill of skills) {
+    try {
+      const last = await AuditLog.findOne({
+        where: { action: 'SKILL_INSTALLED', target_id: skill.meta.name },
+        order: [['created_at', 'DESC']],
+      });
+      if (last) continue;
+      await writeAudit('SKILL_INSTALLED', 'skill', skill.meta.name, { name: skill.meta.name });
+    } catch (err) {
+      logger.warn({ err, skill: skill.meta.name }, '写技能安装审计失败');
+    }
+  }
+}
+
 /** 提示词文件的清单（**`prompts/*.md` + `SOUL.md`**） */
 function promptFiles(): string[] {
   const files: string[] = [];

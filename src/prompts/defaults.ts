@@ -133,6 +133,18 @@ export const CRON_FILE_TEMPLATE = `{
 `;
 
 /**
+ * `data/mcp.json` 的模板 —— **外部 MCP server 列表**
+ * （见 [12-c C5](../docs/12-c-需求-工具技能与扩展.md)）。
+ *
+ * 📌 **空的 = 没接任何 MCP server** —— 这是正常状态，不是错误。
+ * ⚠️ **第三方 server 的工具默认每次都要确认**（`toolPolicy: 'ask'`）。
+ */
+export const MCP_FILE_TEMPLATE = `{
+  "servers": []
+}
+`;
+
+/**
  * `data/pricing.json` 的模板 —— **单价表**。
  *
  * 📌 **单价跟着模型配置走** —— 换模型要能换价（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）。

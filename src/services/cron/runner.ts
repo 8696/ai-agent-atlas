@@ -1,0 +1,130 @@
+import { nanoid } from 'nanoid';
+import { HumanMessage } from '@langchain/core/messages';
+import { isInterrupted } from '@langchain/langgraph';import { getGraph } from '../../agent/graph.js';
+import { logger } from '../../logger.js';
+import { writeAudit } from '../../lib/audit.js';
+import { appendAssistantMessage, appendUserMessage } from '../message.js';
+import { createSession, findSession } from '../session.js';
+import type { CronTask } from './store.js';
+
+/**
+ * 定时任务的执行 —— **跑一次完整的图**（见 [12-b B11](./docs/12-b-需求-对话与编排.md)）。
+ *
+ * 📌 **复用同一套编排与工具池** —— 定时任务跟用户聊天没有本质区别，
+ * 只是「没人盯着」。
+ *
+ * ⚠️ **无人值守的确认闸** —— 任务里若触发高危工具要确认：
+ * **跳过该步并记录**，**不能挂死**（没有人会来点批准）。
+ * 可在任务里显式声明 `autoApprove` 放行（**高危，要显式写出来**）。
+ */
+
+/** 一次运行的结果 */
+export interface CronRunResult {
+  /** 跑成功了吗 */
+  ok: boolean;
+  /** Agent 的回答 */
+  text: string;
+  /** 是不是因为要人工确认而跳过 */
+  skipped: boolean;
+  /** 跳过 / 失败的原因 */
+  reason: string;
+}
+
+/** 子图的 thread_id（**每个任务一个** —— 别跟聊天会话抢检查点） */
+function cronThreadId(task: CronTask): string {
+  return `cron:${task.id}`;
+}
+
+/**
+ * 跑一个定时任务。
+ *
+ * ⚠️ **不抛异常** —— 失败也要把任务状态记下来（不然下次一直重试）。
+ */
+export async function runCronTask(task: CronTask): Promise<CronRunResult> {
+  // ── 会话没了就重建一个（**任务不该因为会话被删就彻底哑掉**） ──
+  let sessionId = task.sessionId;
+  if (!sessionId || !(await findSession(sessionId))) {
+    const session = await createSession({ title: `定时任务 · ${task.name}` });
+    sessionId = session.id;
+  }
+
+  const messageId = nanoid();
+  await appendUserMessage(sessionId, task.prompt);
+
+  let text = '';
+  let interrupted = false;
+
+  try {
+    const graph = getGraph();
+    const stream = (await graph.stream(
+      {
+        turnMessages: [new HumanMessage(task.prompt)],
+        sessionId,
+        messageId,
+        // 📌 **显式放行的工具** —— 无人值守时这些不弹确认
+        autoApprove: task.autoApprove,
+      },
+      {
+        configurable: { thread_id: cronThreadId(task) },
+        streamMode: ['custom', 'values'] as never,
+      },
+    )) as unknown as AsyncIterable<unknown>;
+
+    for await (const chunk of stream) {
+      const [mode, payload] = chunk as [string, unknown];
+      if (mode !== 'values') continue;
+
+      if (isInterrupted(payload)) {
+        // ⚠️ **要人工确认 → 停在这里** —— 没人会来批准，不能挂死
+        interrupted = true;
+        break;
+      }
+      const value = (payload ?? {}) as { finalText?: unknown };
+      if (typeof value.finalText === 'string') text = value.finalText;
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    logger.error({ err, task: task.id }, '定时任务跑失败了');
+    await writeAudit('CRON_TRIGGERED', 'cron', task.id, {
+      name: task.name,
+      status: 'error',
+      error: message,
+    });
+    return { ok: false, text: '', skipped: false, reason: message };
+  }
+
+  if (interrupted) {
+    const reason = '因需人工确认已跳过';
+    logger.warn({ task: task.id, name: task.name }, `定时任务「${task.name}」${reason}`);
+    await writeAudit('CRON_TRIGGERED', 'cron', task.id, {
+      name: task.name,
+      status: 'skipped',
+      reason,
+    });
+    return { ok: false, text: '', skipped: true, reason };
+  }
+
+  await appendAssistantMessage(sessionId, {
+    id: messageId,
+    content: text,
+    parts: [{ type: 'text', text }],
+  });
+
+  await writeAudit('CRON_TRIGGERED', 'cron', task.id, {
+    name: task.name,
+    status: 'success',
+    sessionId,
+  });
+
+  return { ok: true, text, skipped: false, reason: '' };
+}
+
+/**
+ * 手动跑一次（**CLI 用**）。
+ *
+ * 📌 **和调度器走同一个函数** —— 手动触发与到点触发行为一致。
+ */
+export async function triggerCronTask(task: CronTask): Promise<CronRunResult> {
+  logger.info({ task: task.id, name: task.name }, '手动触发定时任务');
+  return runCronTask(task);
+}

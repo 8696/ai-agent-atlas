@@ -1,12 +1,14 @@
 import { tool as makeTool } from '@langchain/core/tools';
 import { config } from '../config.js';
 import { logger } from '../logger.js';
+import { spawnSubagentTool } from '../agent/subagent.js';
 import { getSkills } from '../skills/store.js';
 import { skillToolGroups } from '../skills/tools.js';
 import { fsTools } from './builtin/fs.js';
 import { httpTools } from './builtin/http.js';
 import { shellTools } from './builtin/shell.js';
 import { timeTools } from './builtin/time.js';
+import { getMcpManager, mcpToolGroups } from './mcp/manager.js';
 import type { ToolDefinition, ToolSource } from './types.js';
 
 /**
@@ -104,17 +106,21 @@ export function builtinToolGroups(): ToolGroup[] {
     { source: 'builtin', tools: shellTools },
     { source: 'builtin', tools: httpTools(config.WEB_SEARCH_URL) },
     { source: 'builtin', tools: timeTools },
+    // 📌 **子代理派发** —— 也是内置工具（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
+    { source: 'builtin', tools: [spawnSubagentTool] },
   ];
 }
 
 /**
- * 全部工具组 —— **内置 + 技能**（见 [12-c C4](../docs/12-c-需求-工具技能与扩展.md)）。
+ * 全部工具组 —— **内置 + 技能 + MCP**
+ * （见 [12-c C4](../docs/12-c-需求-工具技能与扩展.md) 与 [C5](../docs/12-c-需求-工具技能与扩展.md)）。
  *
  * 📌 **技能工具走同一套权限闸** —— 技能脚本能执行任意代码，
  * 所以默认 `high` 档，**不能绕过确认**。
+ * 📌 **MCP 工具默认 `ask`** —— 第三方来源一律要人确认（见 [C3](../docs/12-c-需求-工具技能与扩展.md)）。
  */
 export function allToolGroups(): ToolGroup[] {
-  return [...builtinToolGroups(), ...skillToolGroups(getSkills())];
+  return [...builtinToolGroups(), ...skillToolGroups(getSkills()), ...mcpToolGroups()];
 }
 
 /** 建一个注册表 */
@@ -130,8 +136,14 @@ export function buildRegistry(groups: ToolGroup[] = allToolGroups()): ToolRegist
 
 let cached: ToolRegistry | undefined;
 
-/** 上次建池时的技能指纹（**技能变了就重建**） */
+/** 上次建池时的工具池指纹（**技能或 MCP 变了就重建**） */
 let cachedFingerprint = '';
+
+/**
+ * ⚠️ **手动注入的注册表被「钉住」** ——
+ * 注入之后指纹再变也不自动重建（否则刚注入的工具池会被顶掉）。
+ */
+let pinned = false;
 
 /** 技能集合的指纹 —— **名字 + 脚本数 + 是否启用** */
 function skillFingerprint(): string {
@@ -146,6 +158,22 @@ function skillFingerprint(): string {
 }
 
 /**
+ * 工具池指纹 —— **技能变了、MCP 连上了都要重建**。
+ *
+ * 📌 **MCP 的指纹来自连接状态** —— server 连上 / 断开 / 工具列表变了，
+ *    工具池都要跟着变（否则模型看不到新接进来的工具）。
+ */
+function toolPoolFingerprint(): string {
+  let mcp: string;
+  try {
+    mcp = getMcpManager().fingerprint();
+  } catch {
+    mcp = 'mcp-error';
+  }
+  return `${skillFingerprint()}||${mcp}`;
+}
+
+/**
  * 全局注册表（**进程内缓存一份**）。
  *
  * ⚠️ **改描述要重启才生效** —— 描述不要缓存到「下一次调用」，
@@ -156,7 +184,10 @@ function skillFingerprint(): string {
  * 不用等重启（技能**说明**的注入仍然是「下一轮对话」生效）。
  */
 export function getToolRegistry(): ToolRegistry {
-  const fingerprint = skillFingerprint();
+  // ⚠️ **手动注入的注册表不被自动替换** —— 注入者的意图优先于指纹
+  if (pinned && cached) return cached;
+
+  const fingerprint = toolPoolFingerprint();
   if (!cached || fingerprint !== cachedFingerprint) {
     cached = buildRegistry();
     cachedFingerprint = fingerprint;
@@ -168,9 +199,17 @@ export function getToolRegistry(): ToolRegistry {
   return cached;
 }
 
-/** 测试用：换掉全局注册表 */
+/**
+ * 测试用：换掉全局注册表。
+ *
+ * ⚠️ **注入的注册表会被「钉住」** —— 之后指纹再变也不会自动重建，
+ * 否则刚注入的假工具池会被真工具池顶掉（测试就白注入了）。
+ * 传 `undefined` 解钉。
+ */
 export function setToolRegistry(registry: ToolRegistry | undefined): void {
   cached = registry;
+  pinned = registry !== undefined;
+  if (!pinned) cachedFingerprint = '';
 }
 
 /**

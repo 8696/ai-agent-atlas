@@ -129,6 +129,21 @@ export async function syncMessages(sessionId: string, incoming: IncomingMessage[
 }
 
 /**
+ * 追加一条用户消息（**定时任务用** —— 没有前端参与，对账模型用不上）。
+ *
+ * ⚠️ **只追加、不对账** —— 调用方（定时任务）自己管历史。
+ */
+export async function appendUserMessage(sessionId: string, content: string): Promise<string> {
+  const id = nanoid();
+  await insertRow(sessionId, {
+    id,
+    role: 'user',
+    parts: [{ type: 'text', text: content }],
+  });
+  return id;
+}
+
+/**
  * 追加一条 assistant 消息（**流结束后调**）。
  *
  * ⚠️ **`parts` 与推给前端的是同一份** —— 都来自同一批 chunk（见 [12-b B1](../docs/12-b-需求-对话与编排.md)）。

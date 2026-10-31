@@ -38,11 +38,14 @@ function lastUserText(messages: BaseMessage[]): string {
 export async function prepareNode(state: {
   turnMessages: BaseMessage[];
   sessionId?: string | undefined;
+  isolated?: boolean | undefined;
 }): Promise<AtlasStateUpdate> {
   // ── 摘要与裁剪 ──
   let messages = state.turnMessages;
   let summary = '';
-  if (state.sessionId) {
+  // ⚠️ **子代理不看主对话的历史** —— 只给它「任务」这一条
+  //    （见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
+  if (state.sessionId && !state.isolated) {
     try {
       const context = await prepareSessionContext(state.sessionId, state.turnMessages);
       messages = context.messages;

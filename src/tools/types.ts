@@ -31,6 +31,12 @@ export interface ToolContext {
   messageId?: string | undefined;
   /** 客户端断开时 abort */
   signal?: AbortSignal | undefined;
+  /**
+   * 这次工具调用的 id（**父图恢复时不变**）。
+   *
+   * 📌 **子代理靠它算稳定的 thread_id** —— 重跑时不能换。
+   */
+  toolCallId?: string | undefined;
 }
 
 /** 工具执行结果 */

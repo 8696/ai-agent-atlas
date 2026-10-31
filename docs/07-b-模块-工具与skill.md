@@ -50,7 +50,7 @@
 
 **本期做到哪（2026-10）**：✅ 模块 04 已落地
 （`tools/registry.ts` + `tools/selection.ts` + `tools/types.ts`）——
-**只有 `builtin` 一个来源**；Skill / MCP 的合并逻辑写好了但还没接来源。
+**三个来源都接上了**：`builtin`（内置）· `skill`（技能）· `mcp`（外部 server）。
 ⚠️ **裁剪结果还没记进 trace** —— trace 本身还没做。
 
 ---

@@ -63,6 +63,29 @@ function preview(value: unknown): string {
   }
 }
 
+/** 子代理卡片的入参（**名字 · 任务**） */
+interface SubagentInput {
+  name?: string;
+  task?: string;
+}
+
+/** 这是不是子代理卡片（**见 [12-b B10](../docs/12-b-需求-对话与编排.md)）） */
+function isSubagent(card: ToolCardData): boolean {
+  return card.toolName === 'spawn_subagent';
+}
+
+/** 子代理的名字（**没写就用默认名**） */
+function subagentName(card: ToolCallCardProps['card']): string {
+  const input = card.input as SubagentInput | undefined;
+  return input?.name?.trim() || '子代理';
+}
+
+/** 子代理的任务 */
+function subagentTask(card: ToolCallCardProps['card']): string {
+  const input = card.input as SubagentInput | undefined;
+  return input?.task?.trim() ?? '';
+}
+
 interface ToolCallCardProps {
   card: ToolCardData;
 }
@@ -73,6 +96,7 @@ export function ToolCallCard({ card }: ToolCallCardProps) {
   const status = statusOf(card);
   const input = preview(card.input);
   const output = card.output ?? '';
+  const subagent = isSubagent(card);
 
   return (
     <div className="atlas-tool" data-status={card.status}>
@@ -85,7 +109,10 @@ export function ToolCallCard({ card }: ToolCallCardProps) {
         <span className="atlas-tool-icon" aria-hidden>
           <ToolOutlined />
         </span>
-        <span className="atlas-tool-name">{card.toolName}</span>
+        {/* 📌 **子代理卡片显示名字** —— 「spawn_subagent」对用户没意义 */}
+        <span className="atlas-tool-name">
+          {subagent ? `子代理 · ${subagentName(card)}` : card.toolName}
+        </span>
         <span className={`atlas-tag ${status.tone}`}>
           {status.icon}
           {status.label}
@@ -100,7 +127,25 @@ export function ToolCallCard({ card }: ToolCallCardProps) {
 
       {card.error ? <div className="atlas-tool-error">{card.error}</div> : null}
 
-      {open ? (
+      {/* 📌 **子代理：任务与摘要直接摊开** —— 用户要看到「派了什么活、查出了什么」 */}
+      {subagent ? (
+        <div className="atlas-tool-detail">
+          {subagentTask(card) ? (
+            <div className="atlas-tool-block">
+              <div className="atlas-tool-label">任务</div>
+              <pre className="atlas-tool-pre">{subagentTask(card)}</pre>
+            </div>
+          ) : null}
+          {output ? (
+            <div className="atlas-tool-block">
+              <div className="atlas-tool-label">摘要</div>
+              <pre className="atlas-tool-pre">{output}</pre>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {open && !subagent ? (
         <div className="atlas-tool-detail">
           {input ? (
             <div className="atlas-tool-block">

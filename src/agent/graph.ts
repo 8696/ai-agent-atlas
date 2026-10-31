@@ -29,6 +29,8 @@ interface RouteState {
   executedToolCalls: string[];
   steps: number;
   haltReason: string | null;
+  /** 步数上限（**子代理用自己的** —— 0 = 用全局的） */
+  maxSteps?: number | undefined;
 }
 
 /**
@@ -50,8 +52,9 @@ export function routeAfterPlan(state: RouteState): 'tools' | 'answer' {
  */
 export function routeAfterTools(state: RouteState): 'tools' | 'plan' | 'answer' {
   if (state.haltReason) return 'answer';
-  // ⚠️ **步数上限** —— 超了直接收尾
-  if ((state.steps ?? 0) >= config.MAX_TOOL_STEPS) return 'answer';
+  // ⚠️ **步数上限** —— 超了直接收尾（子代理用自己的上限）
+  const limit = state.maxSteps && state.maxSteps > 0 ? state.maxSteps : config.MAX_TOOL_STEPS;
+  if ((state.steps ?? 0) >= limit) return 'answer';
   return pickNextToolCall(state) ? 'tools' : 'plan';
 }
 
