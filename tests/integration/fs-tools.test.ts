@@ -31,6 +31,8 @@ beforeAll(() => {
   mkdirSync(join(paths.workspaceRoot, 'sub'), { recursive: true });
   writeFileSync(join(paths.workspaceRoot, 'a.txt'), 'hello\nworld\n');
   writeFileSync(join(paths.workspaceRoot, 'sub', 'b.ts'), 'export const x = 1;\n');
+  // 📌 **项目指令文件**（在项目根，不在工作区里）
+  writeFileSync(paths.agents, '# 项目指令\n\n上下文文件标记XYZ\n', 'utf8');
 });
 
 describe('list_dir', () => {
@@ -73,6 +75,31 @@ describe('read_file', () => {
     const result = await invoke('read_file', { path: 'a.txt', offset: 2, limit: 1 });
     expect(result.output).toContain('world');
     expect(result.output).not.toContain('hello');
+  });
+
+  it('📌 项目指令文件（`AGENTS.md`）能读 —— 它在项目根，不在工作区里', async () => {
+    const result = await invoke('read_file', { path: 'AGENTS.md' });
+    expect(result.ok).toBe(true);
+    expect(result.output).toContain('上下文文件标记XYZ');
+    // 📌 **不过全局截断** —— 模型要一次读完（截掉头只剩尾更糟）
+    expect(result.truncate).toBe(false);
+  });
+
+  it('⚠️ 带目录的路径不算上下文文件 → 读不到项目根那份', async () => {
+    const result = await invoke('read_file', { path: 'sub/AGENTS.md' });
+    expect(result.ok).toBe(false);
+    expect(result.output).not.toContain('上下文文件标记XYZ');
+  });
+
+  it('⚠️ `../` 绕出去 → 越界', async () => {
+    const result = await invoke('read_file', { path: '../AGENTS.md' });
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain('超出工作区');
+  });
+
+  it('⚠️ `.env` 之类的东西读不到（只有上下文文件开了口子）', async () => {
+    const result = await invoke('read_file', { path: '.env' });
+    expect(result.ok).toBe(false);
   });
 });
 

@@ -58,7 +58,7 @@ export async function parseScheduleToCron(schedule: string): Promise<string> {
     );
   }
 
-  const chat = createChatModel(model);
+  const chat = await createChatModel(model);
   let reply: string;
   try {
     const response = await chat.invoke([

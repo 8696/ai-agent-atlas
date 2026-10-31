@@ -330,7 +330,12 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
   }
 
   const duration = Date.now() - started;
-  const clipped = truncateOutput(result.output);
+  // ⚠️ **工具能自报「别截我」** —— 比如读项目指令文件：
+  //    全局截断（保留尾部）会把文件头切掉，模型读到的是半截
+  const clipped =
+    result.truncate === false
+      ? { text: result.output, truncated: false, originalLength: result.output.length }
+      : truncateOutput(result.output);
   const ok = result.ok;
 
   // ⚠️ **工具结果过注入检测** —— 命中只告警 + 收紧，不直接拒答

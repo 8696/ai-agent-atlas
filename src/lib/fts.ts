@@ -160,16 +160,69 @@ export async function ensureFtsTables(force = false): Promise<FtsCapability> {
 }
 
 /**
- * 把查询词包成 FTS5 的**短语查询**。
+ * 英文停用词（**太常见，当关键词没意义** —— 「the」当关键词会把一堆消息都捞出来）。
+ */
+const STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'but', 'not', 'you', 'your', 'all', 'any', 'can',
+  'did', 'does', 'how', 'what', 'when', 'where', 'which', 'who', 'why', 'was',
+  'were', 'been', 'being', 'have', 'has', 'had', 'with', 'from', 'into', 'that',
+  'this', 'these', 'those', 'there', 'then', 'than', 'them', 'they', 'its',
+  'our', 'out', 'off', 'over', 'under', 'again', 'just', 'like', 'about',
+  'would', 'could', 'should', 'will', 'shall', 'may', 'might', 'must', 'get',
+  'got', 'had', 'him', 'her', 'his', 'she', 'his', 'too', 'very', 'also',
+]);
+
+/** 一个查询最多拆几个词（**FTS5 的 OR 串别太长**） */
+const MAX_TERMS = 32;
+
+/**
+ * 把用户输入拆成**能命中**的词。
  *
- * ⚠️ **必须包引号** —— 用户输入里可能有 `-` `*` `:` 等 FTS5 语法字符，
+ * ⚠️ **不能整句包成短语** —— 用户问的是自然语言
+ * （「我上次是怎么配那个数据库的」），整句在历史消息里**根本不是连续子串**，
+ * 命中不了（这是 D3 验收项里那句例子的真实行为）。
+ *
+ * 📌 **规则**：
+ * - **中文**：切连续汉字串 → **3 字滑窗**（trigram 至少要 3 个字符才能匹配）
+ *   ⚠️ 3 字窗是**子串**，所以「数据库」能命中「数据库换成了 Postgres」
+ * - **英文 / 数字**：整词留下（≥ 4 字符，且不是停用词）
+ */
+export function expandQueryTerms(text: string): string[] {
+  const terms: string[] = [];
+  const chunks = text
+    .toLowerCase()
+    .split(/[^\p{Script=Han}a-z0-9_]+/u)
+    .filter((chunk) => chunk !== '');
+
+  for (const chunk of chunks) {
+    if (/^\p{Script=Han}+$/u.test(chunk)) {
+      // ⚠️ **不足 3 字匹配不到** —— 丢掉
+      if (chunk.length < 3) continue;
+      if (chunk.length === 3) {
+        terms.push(chunk);
+        continue;
+      }
+      for (let i = 0; i + 3 <= chunk.length; i += 1) terms.push(chunk.slice(i, i + 3));
+      continue;
+    }
+    if (chunk.length >= 4 && !STOPWORDS.has(chunk)) terms.push(chunk);
+  }
+
+  return [...new Set(terms)].slice(0, MAX_TERMS);
+}
+
+/**
+ * 把查询词变成 FTS5 的 **MATCH 串**。
+ *
+ * ⚠️ **每个词都包引号** —— 用户输入里可能有 `-` `*` `:` 等 FTS5 语法字符，
  * 不包的话会直接报语法错（`fts5: syntax error`）。
+ * ⚠️ **多个词用 OR 连起来** —— 整句包成短语的话自然语言问题永远命中不了。
  * ⚠️ **trigram 要求查询词 ≥ 3 字符** —— 太短直接不查（交给降级路径）。
  */
 export function toMatchQuery(text: string): string | null {
-  const cleaned = text.trim().replace(/"/g, '""');
-  if (cleaned.length < 3) return null;
-  return `"${cleaned}"`;
+  const terms = expandQueryTerms(text);
+  if (terms.length === 0) return null;
+  return terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(' OR ');
 }
 
 /** 查会话内容 */

@@ -376,8 +376,89 @@ describe('子代理（[12-b B10](../docs/12-b-需求-对话与编排.md)）', ()
     expect(executed).not.toContain('danger_tool');
   });
 
-  it('⚠️ 一次派两个子代理 → 两个都跑完', async () => {
+  it('⚠️ 主对话看到的耗时不含子代理挂在确认框上的等待', async () => {
     const sessionId = await createSession();
+    script = [
+      {
+        when: (text) => text.includes('跑个危险活'),
+        tool: { name: 'spawn_subagent', args: { task: '跑个危险活', name: '危险代理' } },
+      },
+      {
+        when: (text) => text.includes('跑个危险活'),
+        tool: { name: 'danger_tool', args: { value: 'x' } },
+      },
+      { when: (text) => !text.includes('跑个危险活'), text: '都查完了' },
+    ];
+
+    const response = await postChat(sessionId, [
+      { role: 'user', parts: [{ type: 'text', text: '跑个危险活' }] },
+    ]);
+
+    // 📌 **人为等 1.2 秒再批准** —— 模拟「人想了会儿才点」
+    const humanWaitMs = 1200;
+    const chunks: Chunk[] = [];
+    let confirmed = false;
+    for await (const chunk of readChunks(response)) {
+      chunks.push(chunk);
+      if (chunk.type === 'data-pending-confirm' && !confirmed) {
+        confirmed = true;
+        await new Promise((resolve) => setTimeout(resolve, humanWaitMs));
+        await postConfirm(sessionId, true);
+      }
+    }
+
+    expect(confirmed).toBe(true);
+
+    // 📌 **派发子代理那张卡片的耗时** —— 是「主 Agent 的感知耗时」，
+    //    **不含挂在确认框上的那 1.2 秒**
+    const card = chunks
+      .filter((chunk) => chunk.type === 'data-tool-call')
+      .map((chunk) => chunk['data'] as { toolName?: string; durationMs?: number })
+      .find((item) => item.toolName === 'spawn_subagent');
+    expect(card).toBeDefined();
+    expect(card?.durationMs ?? 0).toBeLessThan(humanWaitMs);
+  });
+
+  it('📌 子代理的 token 计入主对话的预算', async () => {
+    const sessionId = await createSession();
+    script = [
+      {
+        when: (text) => text.includes('帮我查两件事'),
+        tool: { name: 'spawn_subagent', args: { task: '查一下 A', name: 'A' } },
+      },
+      { when: (text) => text.includes('查一下 A'), text: 'A 的结果' },
+      { when: (text) => !text.includes('查一下 A'), text: '都查完了' },
+    ];
+
+    const response = await postChat(sessionId, [
+      { role: 'user', parts: [{ type: 'text', text: '帮我查两件事' }] },
+    ]);
+    for await (const chunk of readChunks(response)) {
+      void chunk;
+    }
+
+    // 📌 **子代理与主对话记在同一个会话下** —— 预算闸按月分桶，
+    //    子代理烧的 token 不能从账上消失
+    const { sequelize } = await import('../../src/db');
+    const { QueryTypes } = await import('sequelize');
+    const rows = await sequelize.query<{
+      session_id: string;
+      message_id: string;
+      prompt_tokens: number;
+      completion_tokens: number;
+    }>(
+      'SELECT session_id, message_id, prompt_tokens, completion_tokens FROM cost_logs WHERE session_id = ?',
+      { type: QueryTypes.SELECT, replacements: [sessionId] },
+    );
+
+    expect(rows.length).toBeGreaterThanOrEqual(2);
+    // 📌 **每一条都挂在主会话下**
+    expect(rows.every((row) => row.session_id === sessionId)).toBe(true);
+    // 📌 **子代理那次的消息 id 带 `subagent:` 前缀**（见 [12-c C6](./12-c-需求-工具技能与扩展.md)）
+    expect(rows.some((row) => row.message_id.startsWith('subagent:'))).toBe(true);
+  });
+
+  it('⚠️ 一次派两个子代理 → 两个都跑完', async () => {    const sessionId = await createSession();
     script = [
       {
         when: (text) => text.includes('同时查两件事'),

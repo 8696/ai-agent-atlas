@@ -202,7 +202,7 @@ export async function compressSession(
 
   let summary: string;
   try {
-    const chat = createChatModel(model);
+    const chat = await createChatModel(model);
     const reply = await chat.invoke([
       new SystemMessage(summaryPrompt()),
       new HumanMessage(

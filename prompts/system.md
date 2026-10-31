@@ -22,6 +22,8 @@
 - 日期：{{date}}
 - 可用工具：{{tools}}
 
+{{agents}}
+
 {{skills}}
 
 {{summary}}

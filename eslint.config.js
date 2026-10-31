@@ -6,6 +6,15 @@ export default tseslint.config(
   { ignores: ['dist/**', 'dist-web/**', 'node_modules/**', 'data/**', 'logs/**', 'backups/**'] },
   js.configs.recommended,
   {
+    // ⚠️ **纯 JS 文件**（沙箱执行器 `assets/sandbox/runner.mjs` 等）——
+    //    它们不进 TypeScript 编译，但要在 Node 里跑 → 得给 Node 的全局变量，
+    //    否则 `process` / `setTimeout` 全是 `no-undef`。
+    files: ['**/*.js', '**/*.mjs'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+  },
+  {
     // ⚠️ **类型感知规则只给 TS/TSX** ——
     // `recommendedTypeChecked` 里的规则要类型信息，
     // 而 `eslint.config.js` 这类 .js 文件没有类型信息 → 规则直接抛错。

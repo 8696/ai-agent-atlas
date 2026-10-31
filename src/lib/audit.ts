@@ -25,6 +25,7 @@ export type AuditAction =
   | 'CRON_CREATED'
   | 'CRON_TRIGGERED'
   | 'SUBAGENT_SPAWNED'
+  | 'MODEL_FALLBACK'
   | 'TOOL_APPROVED'
   | 'TOOL_AUTO_APPROVED'
   | 'TOOL_REJECTED'

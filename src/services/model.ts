@@ -1,6 +1,7 @@
 import { ChatAnthropic } from '@langchain/anthropic';
 import { config } from '../config.js';
 import type { Env } from '../config/schema.js';
+import { assertModelEndpointReachable, isLoopbackUrl } from '../lib/security/model-endpoint.js';
 
 /**
  * 模型解析 —— **全项目唯一一处**拿模型的地方。
@@ -80,16 +81,27 @@ export function resolveThinkingBudget(model: ResolvedModel): number {
  * ⚠️ **Anthropic 适配器覆盖了四家国产模型** ——
  * 它们都提供 Anthropic 兼容端点（`anthropicApiUrl`），行为一致：
  * 标准 `/v1/messages` · 标准 SSE 事件 · 标准 `thinking` 块 · 标准 tool_use。
+ *
+ * 📌 **每次建模型都重新校验端点** —— 启动时校验一次不够，
+ * 域名可能被劫持到内网 / 云元数据地址（见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）。
+ *
+ * 📌 **本地端点可以没有 API Key** —— 本地模型（Ollama / LM Studio / vLLM）
+ * 没有 Key 这回事，塞一个占位串即可（适配器要求非空）。
  */
-export function createChatModel(model: ResolvedModel): ChatAnthropic {
-  if (!model.apiKey) {
+export async function createChatModel(model: ResolvedModel): Promise<ChatAnthropic> {
+  // ⚠️ **端点校验在每次调用前做** —— 域名解析结果可能变了
+  if (model.baseUrl) {
+    await assertModelEndpointReachable(model.baseUrl);
+  }
+  if (!model.apiKey && !isLoopbackUrl(model.baseUrl)) {
     throw new Error(`模型「${model.name}」缺少 API Key —— 检查 .env 里的 LLM_API_KEY`);
   }
   const budget = resolveThinkingBudget(model);
   const thinkingOn = budget > 0;
   return new ChatAnthropic({
     model: model.modelId,
-    anthropicApiKey: model.apiKey,
+    // ⚠️ **本地端点没有 Key** —— 给个占位串，适配器不接受空串
+    anthropicApiKey: model.apiKey ?? 'local-no-key',
     ...(model.baseUrl ? { anthropicApiUrl: model.baseUrl } : {}),
     // ⚠️ **流式也要带用量** —— 不开的话最后一个 chunk 的 `usage_metadata`
     // 只有输出 token（输入 token 在 `message_start` 里，流式不重复给），

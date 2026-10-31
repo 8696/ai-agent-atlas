@@ -8,6 +8,8 @@ import { fsTools } from './builtin/fs.js';
 import { httpTools } from './builtin/http.js';
 import { shellTools } from './builtin/shell.js';
 import { timeTools } from './builtin/time.js';
+import { sandboxToolGroups } from './builtin/code.js';
+import { browserToolGroups } from './builtin/browser.js';
 import { getMcpManager, mcpToolGroups } from './mcp/manager.js';
 import type { ToolDefinition, ToolSource } from './types.js';
 
@@ -108,6 +110,10 @@ export function builtinToolGroups(): ToolGroup[] {
     { source: 'builtin', tools: timeTools },
     // 📌 **子代理派发** —— 也是内置工具（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
     { source: 'builtin', tools: [spawnSubagentTool] },
+    // 📌 **沙箱代码** —— Hermes 的招牌能力（见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）
+    ...sandboxToolGroups(),
+    // 📌 **浏览器** —— 没装 Playwright 就不注册（模型看不到一个必然失败的工具）
+    ...browserToolGroups(),
   ];
 }
 

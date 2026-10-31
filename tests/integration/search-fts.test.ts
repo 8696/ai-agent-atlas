@@ -21,7 +21,9 @@ useTempDatabase();
 
 const { initDatabase } = await import('../../src/db');
 const { umzug } = await import('../../scripts/migrate');
-const { probeFts, ensureFtsTables, toMatchQuery } = await import('../../src/lib/fts');
+const { probeFts, ensureFtsTables, toMatchQuery, expandQueryTerms } = await import(
+  '../../src/lib/fts'
+);
 const { searchAll } = await import('../../src/services/search');
 const { addMemory, clearMemory } = await import('../../src/services/memory/index');
 const { Message } = await import('../../src/models/message.model');
@@ -42,11 +44,27 @@ describe('FTS5 能力探测', () => {
 
   it('查询词要包成短语（**否则 FTS5 语法报错**）', () => {
     expect(toMatchQuery('数据库')).toBe('"数据库"');
-    // ⚠️ **引号要转义** —— 否则用户输入一个引号就把查询语法搞坏了
-    expect(toMatchQuery('a"b')).toBe('"a""b"');
     // ⚠️ **trigram 要求 ≥ 3 字符** —— 太短直接不查
     expect(toMatchQuery('数据')).toBeNull();
     expect(toMatchQuery('ab')).toBeNull();
+  });
+
+  it('📌 自然语言问题要拆词（**整句包短语永远命中不了**）', () => {
+    // ⚠️ **中文按 3 字滑窗切** —— trigram 至少要 3 个字符
+    expect(expandQueryTerms('我上次是怎么配那个数据库的')).toContain('数据库');
+    // 📌 **英文按词切 + 去停用词**
+    expect(expandQueryTerms('How did I configure the database?')).toEqual([
+      'configure',
+      'database',
+    ]);
+    // 📌 **多个词用 OR 连起来**
+    expect(toMatchQuery('Postgres 连接串')).toBe('"postgres" OR "连接串"');
+  });
+
+  it('📌 引号这类语法字符不会把查询搞坏', () => {
+    // 📌 **引号是分隔符** —— 拆词时就被切掉了，语法不会坏
+    expect(toMatchQuery('data"base')).toBe('"data" OR "base"');
+    expect(toMatchQuery('a*b-c:d')).toBeNull();
   });
 });
 

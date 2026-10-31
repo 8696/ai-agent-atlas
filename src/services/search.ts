@@ -164,7 +164,7 @@ export async function summarizeHits(query: string, hits: SearchHit[]): Promise<s
   const lines = hits.map((hit, index) => `${index + 1}. [${hit.title}] ${hit.snippet}`);
 
   try {
-    const chat = createChatModel(model);
+    const chat = await createChatModel(model);
     const reply = await chat.invoke([
       {
         role: 'system',

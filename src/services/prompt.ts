@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { config } from '../config.js';
 import { DIRS, FILES, PROJECT_ROOT } from '../config/paths.js';
 
 /**
@@ -18,6 +19,7 @@ export const KNOWN_PLACEHOLDERS = [
   'memories',
   'retrieval',
   'summary',
+  'agents',
 ] as const;
 
 /**
@@ -56,6 +58,37 @@ export interface PromptContext {
   summary?: string | undefined;
   /** 人格文件名（**SOUL.md 的文件名，不含路径**） */
   personality?: string | undefined;
+  /** 项目指令（**`AGENTS.md` 的正文**） */
+  agents?: string | undefined;
+}
+
+/**
+ * 把项目指令正文拼成一段（**含小标题**）。
+ *
+ * ⚠️ **纯函数** —— 文件读不读是另一回事（`readAgentsInstructions` 管那个）。
+ */
+export function formatAgentsInstructions(raw: string, maxChars: number): string {
+  const text = raw.trim();
+  if (text === '') return '';
+  const body =
+    text.length <= maxChars
+      ? text
+      : `${text.slice(0, maxChars)}\n\n` +
+        `（⚠️ AGENTS.md 已截断 —— 这里只用了前 ${maxChars} 字，全文共 ${text.length} 字。` +
+        `要看后面的章节，用 read_file 读 "AGENTS.md" 拿全文；完整内容也在项目根目录的 AGENTS.md）`;
+  return `## 项目指令（AGENTS.md）\n\n${body}`;
+}
+
+/**
+ * 项目指令（`AGENTS.md`）—— **每轮读文件，不缓存**。
+ *
+ * ⚠️ **文件不存在 → 跳过** —— 它是**项目**的指令文件，不是 Atlas 的出厂文件。
+ * ⚠️ **超长会截断** —— 项目指令可能有几万字，
+ * **每轮全量注入会把上下文吃光**（预算按月算的），
+ * 所以按 `AGENTS_MAX_CHARS` 截断，并**明说截断了**（别让模型以为看到了全文）。
+ */
+export function readAgentsInstructions(maxChars = config.AGENTS_MAX_CHARS): string {
+  return formatAgentsInstructions(readTextFile(FILES.agents), maxChars);
 }
 
 /** 今天（本地时区粗略取 YYYY-MM-DD） */
@@ -99,7 +132,9 @@ export function personalityPath(name: string | undefined): string {
 /**
  * 组装系统提示词 = **人格（`SOUL.md`）+ 系统提示词（`prompts/system.md`）**。
  *
- * ⚠️ `AGENTS.md` 是**项目级指令**，不进系统提示词（那是给人看的文件，不是 Atlas 的人格）。
+ * 📌 **`AGENTS.md`（项目指令）走 `{{agents}}` 占位符** ——
+ * 它是「这个项目的规矩」，跟「你是谁」（人格）是两回事，
+ * 所以单独一段，不跟 `SOUL.md` 混在一起。
  */
 export function buildSystemPrompt(ctx: PromptContext = {}): string {
   const soul = readTextFile(personalityPath(ctx.personality)).trim();
@@ -113,6 +148,8 @@ export function buildSystemPrompt(ctx: PromptContext = {}): string {
     memories: ctx.memories ?? '（暂无）',
     retrieval: ctx.retrieval ?? '',
     summary: ctx.summary ?? '',
+    // 📌 **项目指令为空就整段不出现** —— 没有 AGENTS.md 的项目不该留空标题
+    agents: ctx.agents ?? '',
   });
 
   return [soul, rendered].filter(Boolean).join('\n\n---\n\n');

@@ -143,7 +143,7 @@ export async function runSkillAutocreate(input: {
   // ── 问模型「这轮有没有值得沉淀的经验」 ──
   let reply: unknown;
   try {
-    const chat = createChatModel(model);
+    const chat = await createChatModel(model);
     const bound = chat.bindTools(
       toLangChainTools([skillCreateTool, skillUpdateTool]) as never[],
     );

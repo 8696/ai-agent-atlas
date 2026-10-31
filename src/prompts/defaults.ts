@@ -31,6 +31,8 @@ export const DEFAULT_SYSTEM_PROMPT = `# 基础人格与安全边界
 - 日期：{{date}}
 - 可用工具：{{tools}}
 
+{{agents}}
+
 {{skills}}
 
 {{summary}}

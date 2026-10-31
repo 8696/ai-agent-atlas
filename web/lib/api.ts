@@ -207,14 +207,18 @@ export interface ConfirmResponse {
  * 批准 / 取消一次危险操作。
  *
  * ⚠️ **超时给长一点** —— `completed` 那条路要把剩下的对话跑完。
+ *
+ * 📌 **`fingerprint` 是入参指纹** —— 后端拿它核对「批准的是不是这一组参数」，
+ * 对不上就重新弹确认（见 [12-b B5](../../docs/12-b-需求-对话与编排.md)）。
  */
 export async function confirmToolCall(
   sessionId: string,
   approved: boolean,
+  fingerprint?: string,
 ): Promise<ConfirmResponse> {
   const { data } = await api.post<ConfirmResponse>(
     '/chat/confirm',
-    { sessionId, approved },
+    { sessionId, approved, ...(fingerprint ? { fingerprint } : {}) },
     { timeout: 180_000 },
   );
   return data;

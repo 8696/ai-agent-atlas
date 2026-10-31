@@ -161,7 +161,7 @@ export async function runMemoryExtraction(input: {
   // ── T2：调模型抽取 ──
   let raw: string;
   try {
-    const chat = createChatModel(model);
+    const chat = await createChatModel(model);
     const reply = await chat.invoke([
       new SystemMessage(extractionPrompt()),
       new HumanMessage(

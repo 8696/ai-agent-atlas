@@ -72,6 +72,11 @@ const chatRequestSchema = z.object({
 const confirmRequestSchema = z.object({
   sessionId: z.string().min(1),
   approved: z.boolean(),
+  /**
+   * ⚠️ **入参指纹** —— 前端从确认卡片里带回来（**批准的是哪一组参数**）。
+   * 后端核对不上就重新弹确认（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
+   */
+  fingerprint: z.string().optional(),
 });
 
 export const chatRouter = new Router({ prefix: '/api/v1' });
@@ -389,15 +394,18 @@ chatRouter.post('/chat/confirm', async (ctx) => {
   if (!parsed.success) {
     throw new AppError('INVALID_REQUEST', '请求体格式不对', 400);
   }
-  const { sessionId, approved } = parsed.data;
+  const { sessionId, approved, fingerprint } = parsed.data;
 
   const session = await findSession(sessionId);
   if (!session) {
     throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
   }
 
+  // 📌 **把指纹带回去** —— 后端核对「批准的是不是这一组参数」
+  const decision = { approved, ...(fingerprint ? { fingerprint } : {}) };
+
   // ── 路 1：有人在等 ──
-  if (resolvePendingDecision(sessionId, { approved })) {
+  if (resolvePendingDecision(sessionId, decision)) {
     ctx.body = { ok: true, mode: 'resumed' };
     return;
   }
@@ -408,7 +416,7 @@ chatRouter.post('/chat/confirm', async (ctx) => {
     const events = streamChatTurn({
       sessionId,
       messageId: nanoid(),
-      resume: { approved },
+      resume: decision,
     });
     for await (const chunk of createChatEventStream({ events })) {
       parts.add(chunk);

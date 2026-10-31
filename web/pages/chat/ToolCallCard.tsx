@@ -167,8 +167,13 @@ export function ToolCallCard({ card }: ToolCallCardProps) {
 
 interface PendingConfirmCardProps {
   payload: PendingConfirmData;
-  /** 点批准 / 取消（**由聊天页统一处理**） */
-  onConfirm: (approved: boolean) => void;
+  /**
+   * 点批准 / 取消（**由聊天页统一处理**）。
+   *
+   * 📌 **带上入参指纹** —— 后端拿它核对「批准的是不是这一组参数」，
+   * 对不上就重新弹确认（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
+   */
+  onConfirm: (approved: boolean, fingerprint: string) => void;
   /** 处理中（**点了之后要禁用按钮**） */
   busy?: boolean;
   /**
@@ -208,12 +213,12 @@ export function PendingConfirmCard({
             type="primary"
             size="small"
             loading={busy}
-            onClick={() => onConfirm(true)}
+            onClick={() => onConfirm(true, payload.fingerprint)}
             icon={<CheckCircleOutlined />}
           >
             批准
           </Button>
-          <Button size="small" disabled={busy} onClick={() => onConfirm(false)}>
+          <Button size="small" disabled={busy} onClick={() => onConfirm(false, payload.fingerprint)}>
             取消
           </Button>
         </Space>

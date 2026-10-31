@@ -34,7 +34,7 @@ interface Props {
   /** 点建议问题 → 直接发出去 */
   onPickSuggestion?: (text: string) => void;
   /** 人工确认（**批准 / 取消**） */
-  onConfirm?: (approved: boolean, toolCallId: string) => void;
+  onConfirm?: (approved: boolean, toolCallId: string, fingerprint: string) => void;
   /** 确认处理中（**禁用按钮**） */
   confirming?: boolean;
 }
@@ -265,7 +265,9 @@ export function MessageList({
                       payload={block.payload}
                       busy={confirming}
                       resolved={block.resolved}
-                      onConfirm={(approved) => onConfirm?.(approved, block.payload.toolCallId)}
+                      onConfirm={(approved, fingerprint) =>
+                        onConfirm?.(approved, block.payload.toolCallId, fingerprint)
+                      }
                     />
                   );
                 }

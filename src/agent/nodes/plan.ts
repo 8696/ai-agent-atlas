@@ -6,13 +6,14 @@ import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { scanInjection, tightenSensitivity } from '../../lib/security/injection.js';
 import { estimateTokens } from '../../lib/tokens.js';
-import { buildSystemPrompt } from '../../services/prompt.js';
+import { writeAudit } from '../../lib/audit.js';
+import { buildSystemPrompt, readAgentsInstructions } from '../../services/prompt.js';
 import {
-  createChatModel,
   resolveFallback,
   resolveModel,
   type ResolvedModel,
 } from '../../services/model.js';
+import { streamChatModel, readReasoningDelta } from '../model-stream.js';
 import { recordUsage } from '../../services/cost.js';
 import { getSessionSettings } from '../../services/session.js';
 import { requestSignal } from '../abort.js';
@@ -35,20 +36,7 @@ import type { AtlasStateUpdate } from '../state.js';
  */
 
 /** 从一块模型增量里取出思考文本（**Anthropic 把思考放在独立块里**） */
-export function readReasoningDelta(chunk: { contentBlocks?: unknown }): string {
-  if (!Array.isArray(chunk.contentBlocks)) return '';
-  let out = '';
-  for (const block of chunk.contentBlocks) {
-    if (!block || typeof block !== 'object') continue;
-    const record = block as { type?: unknown; reasoning?: unknown; thinking?: unknown };
-    if (record.type === 'reasoning' && typeof record.reasoning === 'string') {
-      out += record.reasoning;
-    } else if (record.type === 'thinking' && typeof record.thinking === 'string') {
-      out += record.thinking;
-    }
-  }
-  return out;
-}
+export { readReasoningDelta };
 
 /** 最后一条用户消息（**拿它做工具裁剪的查询**） */
 function lastUserText(messages: BaseMessage[]): string {
@@ -151,13 +139,11 @@ export async function planNode(
     summary: state.summary || undefined,
     ...(state.skills ? { skills: state.skills } : {}),
     ...(personality ? { personality } : {}),
+    // 📌 **项目指令（`AGENTS.md`）每轮现读** —— 改完下一轮就生效，不用重启
+    //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）
+    agents: readAgentsInstructions(),
   });
   const messages: BaseMessage[] = [new SystemMessage(systemPrompt), ...state.messages];
-
-  // ── 调模型（**一次流里出字 + 出工具调用**） ──
-  const chatModel = createChatModel(model);
-  const bound =
-    tools.length > 0 ? chatModel.bindTools(toLangChainTools(tools) as never[]) : chatModel;
 
   // 📌 **优先用网关登记的那份信号** —— LangGraph 组合出来的那个
   //    偶尔对不上（客户端断开时上游停不下来，白烧 token）；
@@ -170,13 +156,30 @@ export async function planNode(
     return { messages: [], notice: null };
   }
 
-  const stream = await bound.stream(messages, {
+  // ── 调模型（**一次流里出字 + 出工具调用**） ──
+  // 📌 **带降级与故障转移** —— 供应商不支持思考 → 关掉思考重试；
+  //    主模型报错 → 切备用模型（**只在还没吐过内容时切**）
+  //    （见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）
+  const fallback = resolveFallback();
+  const chatModel = streamChatModel({
+    primary: model,
+    // ⚠️ **别拿同一个模型当备用** —— 会原地重试
+    fallback: fallback && fallback.name !== model.name ? fallback : undefined,
+    thinkingBudget,
+    messages,
+    tools: tools.length > 0 ? toLangChainTools(tools) : [],
     ...(signal ? { signal } : {}),
+    onStrategyChange: (from, to, reason) => {
+      logger.warn({ from, to, reason: reason.slice(0, 200) }, '模型策略变了');
+      void writeAudit('MODEL_FALLBACK', 'model', to, {
+        from,
+        to,
+        reason: reason.slice(0, 300),
+        sessionId: state.sessionId,
+      });
+    },
   });
 
-  // ⚠️ **用 `getWriter(config)` 而不是 `writer()`** ——
-  //    1.5.3 的 `writer()` 读的是 `configurable.writer`，
-  //    而框架把它挂在 `config.writer` 上（读不到就静默丢事件）
   const emit = getWriter(runnableConfig);
 
   let text = '';
@@ -184,16 +187,19 @@ export async function planNode(
   let usage = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  // 📌 **记账要用「真正跑出这一轮的那个模型」** —— 切过备用就不能记主模型的账
+  let usedModel = model;
 
-  for await (const chunk of stream) {
+  for await (const item of chatModel) {
     if (runnableConfig.signal?.aborted) break;
 
-    const piece = chunk as unknown as {
+    const piece = item.chunk as {
       text?: string;
       contentBlocks?: unknown;
       tool_call_chunks?: Array<{ index?: number; id?: string; name?: string; args?: string }>;
       usage_metadata?: { total_tokens?: number; input_tokens?: number; output_tokens?: number };
     };
+    usedModel = item.model;
 
     const reasoning = readReasoningDelta(piece);
     if (reasoning) {
@@ -235,12 +241,13 @@ export async function planNode(
   }
   usage = inputTokens + outputTokens;
   // 📌 **每轮记一条成本** —— 预算闸的地基（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
+  // ⚠️ **记真正跑的那个模型** —— 切过备用就不能记主模型的账
   if (inputTokens > 0 || outputTokens > 0) {
     void recordUsage({
       sessionId: state.sessionId ?? null,
       messageId: state.messageId ?? null,
       scope: 'chat',
-      model: model.name,
+      model: usedModel.name,
       inputTokens,
       outputTokens,
     });

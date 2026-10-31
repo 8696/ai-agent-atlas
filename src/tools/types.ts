@@ -53,6 +53,15 @@ export interface ToolResult {
   truncated?: boolean;
   /** 截断前的原始长度 */
   originalLength?: number | undefined;
+  /**
+   * ⚠️ **置 false 就别再过一遍全局截断**（`TOOL_OUTPUT_MAX_CHARS`）。
+   *
+   * 📌 **只有「自己知道输出多大」的工具能这么做** ——
+   * 比如 `read_file` 读项目指令文件（`AGENTS.md`）：
+   * 它有明确的行数上限，全局截断会把「头部」截掉、只剩尾巴，
+   * 模型读到的是半截文件（比读不到更糟）。
+   */
+  truncate?: boolean | undefined;
 }
 
 /** 一个工具定义 */

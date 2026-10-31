@@ -1,5 +1,6 @@
 import { realpathSync } from 'node:fs';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { FILES } from '../../config/paths.js';
 
 /**
  * 路径沙箱 —— **所有文件工具的第一道门**（见 [10 §10.4](../../docs/10-安全方案.md)）。
@@ -30,6 +31,39 @@ export class SandboxError extends Error {
 
 /** 路径长度上限（**超长路径直接拒** —— 正常路径用不了这么长） */
 const MAX_PATH_LENGTH = 4096;
+
+/**
+ * 项目上下文文件 —— **只读**（见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
+ *
+ * ⚠️ **`AGENTS.md` / `SOUL.md` 在项目根，不在工作区里** ——
+ *    但它们**只被截断着注入**系统提示词（省 token），
+ *    模型要看后面的章节时得能自己读全文。
+ *
+ * 📌 **只认裸文件名** —— `AGENTS.md` 行，`sub/AGENTS.md` 不行，
+ * 更不能拿 `../` 绕出去（那就把整个项目根开放了）。
+ *
+ * ⚠️ **只读** —— 写这两个文件照样越界（它们不在工作区里，
+ * 写工具根本到不了）。
+ */
+const CONTEXT_FILES: Record<string, string> = {
+  'agents.md': FILES.agents,
+  'soul.md': FILES.soul,
+};
+
+/**
+ * 这个路径是不是「项目上下文文件」（**是就返回它的绝对路径**）。
+ *
+ * @returns 绝对路径；不是上下文文件就返回 `undefined`
+ */
+export function resolveContextFile(inputPath: unknown): string | undefined {
+  if (typeof inputPath !== 'string') return undefined;
+  const name = inputPath.trim().toLowerCase();
+  // ⚠️ **只认裸文件名** —— 带目录的一律不认
+  if (name === '' || name.includes('/') || name.includes('\\') || name.includes('..')) {
+    return undefined;
+  }
+  return CONTEXT_FILES[name];
+}
 
 /**
  * 把路径解析成「真实路径」（**软链已解开**）。

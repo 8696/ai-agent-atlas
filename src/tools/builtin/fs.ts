@@ -3,7 +3,7 @@ import type { Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { paths } from '../../config.js';
-import { SandboxError, assertNotWorkspaceRoot, resolveInWorkspace, toWorkspaceRelative } from '../../lib/security/sandbox.js';
+import { SandboxError, assertNotWorkspaceRoot, resolveContextFile, resolveInWorkspace, toWorkspaceRelative } from '../../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
 import { hasWildcard, matchesGlob } from '../glob.js';
@@ -22,6 +22,14 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', '.next', '.c
 
 /** 搜索时默认跳过的文件 */
 const SKIP_FILES = new Set(['vectors.db']);
+
+/**
+ * 项目上下文文件（`AGENTS.md` / `SOUL.md`）的读取上限（**字符**）。
+ *
+ * ⚠️ **比普通文件大得多** —— 系统提示词里只带了它们的前一截，
+ * 模型要读全文就得**一次读完**（分段读会烧光工具步数）。
+ */
+const CONTEXT_FILE_MAX_CHARS = 20_000;
 
 /** 出错 → 一个失败的结果（**不是异常** —— 异常在包装层转成错误文本） */
 function fail(error: unknown): ToolResult {
@@ -48,7 +56,9 @@ export const readFileTool: ToolDefinition = {
   name: 'read_file',
   description:
     '读取工作区内某个文本文件的内容。可以指定行范围（offset 从 1 开始，limit 是行数）。' +
-    '文件很大时会自动截断并注明原始长度。',
+    '文件很大时会自动截断并注明原始长度。' +
+    '另外 `AGENTS.md` / `SOUL.md`（项目指令与人格，在项目根目录）也能读 —— ' +
+    '系统提示词里只带了它们的前一截，要看完整内容就用这个。',
   schema: readFileSchema,
   sensitivity: 'normal',
   source: 'builtin',
@@ -57,7 +67,10 @@ export const readFileTool: ToolDefinition = {
   invoke(args): Promise<ToolResult> {
     try {
       const input = parseArgs(readFileSchema, args);
-      const target = resolveInWorkspace(input.path, paths.workspaceRoot);
+      // 📌 **项目上下文文件（`AGENTS.md` / `SOUL.md`）在项目根，不在工作区里** ——
+      //    它们只被截断着注入系统提示词，模型要全文得自己读（**只读**）
+      const contextFile = resolveContextFile(input.path);
+      const target = contextFile ?? resolveInWorkspace(input.path, paths.workspaceRoot);
       const stat = lstatSync(target);
       if (stat.isDirectory()) {
         return done(fail(new SandboxError(`${input.path} 是目录，用 list_dir 看看里面有什么`)));
@@ -67,8 +80,14 @@ export const readFileTool: ToolDefinition = {
       const start = (input.offset ?? 1) - 1;
       const end = input.limit ? start + input.limit : lines.length;
       const slice = lines.slice(start, end).join('\n');
-      const clipped = truncateOutput(slice);
-      const relative = toWorkspaceRelative(target, paths.workspaceRoot);
+      // 📌 **上下文文件一次给够** —— 分段读会烧光工具步数
+      const clipped = contextFile
+        ? truncateOutput(slice, CONTEXT_FILE_MAX_CHARS)
+        : truncateOutput(slice);
+      // 📌 **上下文文件不在工作区里** —— 相对路径算不出来，就用文件名
+      const relative = contextFile
+        ? input.path.trim().toLowerCase()
+        : toWorkspaceRelative(target, paths.workspaceRoot);
       const prefix = `文件：${relative}（共 ${lines.length} 行，本次返回第 ${start + 1}–${Math.min(end, lines.length)} 行）\n`;
       return done({
         ok: true,
@@ -76,6 +95,8 @@ export const readFileTool: ToolDefinition = {
         data: { path: relative, lines: lines.length, returned: Math.max(0, end - start) },
         truncated: clipped.truncated,
         originalLength: clipped.originalLength,
+        // 📌 **上下文文件不过全局截断** —— 截掉头只剩尾，比读不到更糟
+        ...(contextFile ? { truncate: false } : {}),
       });
     } catch (err) {
       return done(fail(err));

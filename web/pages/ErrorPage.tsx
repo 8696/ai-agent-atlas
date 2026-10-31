@@ -1,11 +1,14 @@
 import { Button, Result, Typography } from 'antd';
-import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router-dom';
+import { useNavigate, useRouteError } from 'react-router-dom';
+import { describeRouteError } from './error-view';
 
 /**
- * 错误页 —— 403 / 404 / 500 各有专门文案，**不显示英文原始错误**（见 [04-a §4.2](../docs/04-a-ui-总则布局与菜单.md)）。
+ * 错误页 —— 403 / 404 / 500 各有专门文案，**不显示英文原始错误**（见 [04-a §4.2](../docs/04-a-ui-公共组件.md)）。
  *
  * ⚠️ React Router v7 自带的路由级错误边界比顶层 `<ErrorBoundary>` **更靠近路由组件** ——
  * 每条路由都挂了它（见 `routes.tsx`）。
+ *
+ * 📌 **文案逻辑在 `error-view.ts`** —— 纯函数，能被单元测试直接调。
  */
 
 interface Props {
@@ -16,35 +19,16 @@ interface Props {
 export function ErrorPage({ status }: Props) {
   const error = useRouteError();
   const navigate = useNavigate();
+  const view = describeRouteError(error, status);
 
-  let code = status ?? 500;
-  let title = '页面出错了';
-  let detail = '出了点意外，返回聊天页继续。';
-
-  if (isRouteErrorResponse(error)) {
-    code = error.status;
-    if (code === 404) {
-      title = '页面不存在';
-      detail = '这个地址没有对应的页面。';
-    } else if (code === 403) {
-      title = '没有权限';
-      detail = '本地服务不设权限，可能路径写错了。';
-    } else {
-      title = `出错了（${code}）`;
-      detail = '出了点意外，返回聊天页继续。';
-    }
-  } else if (error instanceof Error && error.message) {
-    detail = error.message;
-  } else if (status === 404) {
-    title = '页面不存在';
-    detail = '这个地址没有对应的页面。';
-  }
+  // 📌 **原始错误只进控制台** —— 不摆到页面上
+  if (error) console.error('[Atlas] 页面出错了', error);
 
   return (
     <Result
-      status={code === 404 ? '404' : code === 403 ? '403' : '500'}
-      title={title}
-      subTitle={<Typography.Text type="secondary">{detail}</Typography.Text>}
+      status={view.code === 404 ? '404' : view.code === 403 ? '403' : '500'}
+      title={view.title}
+      subTitle={<Typography.Text type="secondary">{view.detail}</Typography.Text>}
       extra={
         <Button
           type="primary"

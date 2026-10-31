@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { isLoopbackUrl, modelEndpointProblem } from '../lib/security/model-endpoint.js';
 
 /**
  * 环境变量契约 —— **唯一真源**。
@@ -73,7 +74,7 @@ export const envSchema = z.object({
   USER_MAX_CHARS: z.coerce.number().int().positive().default(1375),
   SUMMARY_ENABLED: boolFromEnv(true),
   SUMMARY_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
-  TOOL_OUTPUT_MAX_CHARS: z.coerce.number().int().positive().default(4000),
+  TOOL_OUTPUT_MAX_CHARS: z.coerce.number().int().positive().default(6000),
   TOOL_OUTPUT_TRUNCATE: z.enum(['head', 'tail']).default('tail'),
   /**
    * ⚠️ **同一个工具连续调用几次就停**（默认 2）——
@@ -121,6 +122,25 @@ export const envSchema = z.object({
   SKILL_TOP_K: z.coerce.number().int().positive().default(3),
   /** 注入技能说明的 token 预算（**超了就不注入下一条**） */
   SKILL_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
+  /**
+   * ⚠️ **注入系统提示词的 `AGENTS.md` 字符上限**（默认 12000）——
+   * 项目指令文件可能有几万字，**每轮全量注入会把上下文吃光**
+   * （月度 token 预算按 20 万算，注入 6000 字就是每轮 4k token）。
+   * 超了只取前面这段，并标注「已截断」——
+   * **模型要后面的章节可以用 `read_file` 读 "AGENTS.md" 拿全文**。
+   */
+  AGENTS_MAX_CHARS: z.coerce.number().int().positive().default(6000),
+
+  // ── 浏览器 ────────────────────────────────────────────
+  /** 浏览器能力总开关（关掉就不注册 `browser` 工具） */
+  BROWSER_ENABLED: boolFromEnv(true),
+  /**
+   * ⚠️ **浏览器允许访问的域名白名单**（逗号分隔，留空 = 不限域名）。
+   *
+   * 📌 留空时**仍走出网校验** —— 云元数据 / 链路本地地址照样禁。
+   * 填了之后只有名单里的域名能访问（`*.example.com` 这种通配也认）。
+   */
+  BROWSER_ALLOWED_DOMAINS: z.string().optional(),
 
   // ── 日志 ──────────────────────────────────────────────
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
@@ -136,15 +156,34 @@ export const ENV_KEYS = Object.keys(envSchema.shape) as (keyof Env)[];
 export function validateRelations(env: Env): string[] {
   const problems: string[] = [];
 
-  // ── 模型：配了模型就三样都得有 ──
+  // ── 模型：配了模型就得有端点 ──
   if (env.LLM_MODEL) {
-    if (!env.LLM_BASE_URL) problems.push('配了 LLM_MODEL 但缺 LLM_BASE_URL');
-    if (!env.LLM_API_KEY) problems.push('配了 LLM_MODEL 但缺 LLM_API_KEY');
+    if (!env.LLM_BASE_URL) {
+      problems.push('配了 LLM_MODEL 但缺 LLM_BASE_URL');
+    } else {
+      // ⚠️ **本地端点免 API Key** —— 本地模型没有 Key 这回事
+      //    （见 [12-a A3](./12-a-需求-应用外壳与上下文.md)）
+      if (!env.LLM_API_KEY && !isLoopbackUrl(env.LLM_BASE_URL)) {
+        problems.push(
+          '配了 LLM_MODEL 但缺 LLM_API_KEY（本地端点 http://127.0.0.1:… 可以不要 Key）',
+        );
+      }
+      // ⚠️ **端点指向云元数据 / 链路本地地址 → 启动即报错**
+      const endpointProblem = modelEndpointProblem(env.LLM_BASE_URL);
+      if (endpointProblem) problems.push(`LLM_BASE_URL 不合法：${endpointProblem}`);
+    }
   }
-  // 备用模型：三样要么都给，要么都不给
+  // 备用模型：三项要么都给，要么都不给
   const fb = [env.LLM_FALLBACK_MODEL, env.LLM_FALLBACK_BASE_URL, env.LLM_FALLBACK_API_KEY];
-  if (fb.some(Boolean) && !fb.every(Boolean)) {
-    problems.push('备用模型三项（LLM_FALLBACK_MODEL / _BASE_URL / _API_KEY）要么都给，要么都不给');
+  if (fb.some(Boolean) && !(fb[0] && fb[1])) {
+    problems.push('备用模型（LLM_FALLBACK_MODEL / _BASE_URL）要么都给，要么都不给');
+  } else if (fb[0] && fb[1]) {
+    // ⚠️ **备用模型也要过端点校验** —— 别让兜底变成后门
+    const fallbackProblem = modelEndpointProblem(env.LLM_FALLBACK_BASE_URL);
+    if (fallbackProblem) problems.push(`LLM_FALLBACK_BASE_URL 不合法：${fallbackProblem}`);
+    if (!env.LLM_FALLBACK_API_KEY && !isLoopbackUrl(env.LLM_FALLBACK_BASE_URL)) {
+      problems.push('备用模型缺 LLM_FALLBACK_API_KEY（本地端点可以不要 Key）');
+    }
   }
 
   return problems;
