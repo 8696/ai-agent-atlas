@@ -138,25 +138,55 @@
   不可用就**退回「时间倒序取最近 N 条」**，功能少一半但**不影响对话**
 - 索引表只存文本，**不存向量**
 
-### 图检查点表（`graph_checkpoints`）
+### 图检查点表（`graph_checkpoints` + `graph_checkpoint_writes`）
 
-> LangGraph checkpointer 的落盘表。**由 LangGraph 的 SQLite saver 管理**，
-> 不手写迁移；这里只登记它的存在，升级 LangGraph 时按它的文档走。
+> LangGraph checkpointer 的落盘表。
+> ⚠️ **本项目自己实现了 saver**（`src/agent/checkpointer.ts`）——
+> LangGraph 官方 SQLite saver 不在依赖里；自己的实现能把表名与列名
+> 对齐本文档的约定。迁移见 `src/migrations/002-init-tools-and-graph.ts`。
+
+**`graph_checkpoints`** —— 一个检查点两行（`type` 区分内容）：
 
 | 字段                   | 类型      | 说明                                 |
 | ---------------------- | --------- | ------------------------------------ |
-| `thread_id`            | TEXT      | 会话 id                              |
+| `id`                   | TEXT PK   | `thread_id\|ns\|checkpoint_id\|类型` |
+| `thread_id`            | TEXT      | 会话 id（**= `thread_id`**）          |
 | `checkpoint_ns`        | TEXT      | 命名空间                             |
 | `checkpoint_id`        | TEXT      |                                      |
 | `parent_checkpoint_id` | TEXT      | 父检查点                             |
-| `type`                 | TEXT      | `checkpoint` / `metadata` / `writes` |
-| `data`                 | TEXT/BLOB | 序列化后的状态                       |
+| `type`                 | TEXT      | `checkpoint` / `metadata`            |
+| `serde_type`           | TEXT      | 序列化器自己的类型（`json` / `bytes`）|
+| `data`                 | TEXT      | **base64 的序列化结果**              |
 | `created_at`           | DATETIME  |                                      |
 
 索引：`idx_gc_thread (thread_id, checkpoint_id)`。
 
+**`graph_checkpoint_writes`** —— 待写入（**一个任务一行**）：
+
+| 字段           | 类型     | 说明                                    |
+| -------------- | -------- | --------------------------------------- |
+| `id`           | TEXT PK  |                                         |
+| `thread_id`    | TEXT     | 会话 id                                 |
+| `checkpoint_ns`| TEXT     |                                         |
+| `checkpoint_id`| TEXT     |                                         |
+| `task_id`      | TEXT     | 产生这次写入的任务                       |
+| `task_path`    | TEXT     | 任务路径（**写入顺序的排序键**）        |
+| `idx`          | INTEGER  | 同任务内的序号                           |
+| `channel`      | TEXT     | 通道名（`__resume__` / `__interrupt__` …）|
+| `serde_type`   | TEXT     | `json` / `bytes`                        |
+| `data`         | TEXT     | base64 的序列化结果                     |
+| `created_at`   | DATETIME |                                         |
+
+索引：`idx_gcw_checkpoint (thread_id, checkpoint_ns, checkpoint_id)`。
+
+> ⚠️ **`data` 存 base64 的 TEXT**（不是 BLOB）——
+> LangGraph 的状态用 JsonPlus 序列化，里面可能有二进制；
+> base64 是「二进制安全 + 不依赖驱动 BLOB 绑定」的两全。
+>
 > ⚠️ **这张表是「进程重启后能续跑」的唯一保障**。
 > 用进程内的 MemorySaver = 重启后对话状态全丢（会话记录还在，但工具调用链断了）。
+>
+> ⚠️ **待写入表也要清** —— 删会话时检查点与待写入一起删，不留孤儿行。
 
 ### 成本流水表（`cost_logs`）
 

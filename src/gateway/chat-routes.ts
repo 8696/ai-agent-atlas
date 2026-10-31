@@ -6,17 +6,18 @@ import { nanoid } from 'nanoid';
 import { createChatEventStream, createPartsAccumulator, describeError } from '../agent/events.js';
 import { AppError } from '../lib/errors.js';
 import { logger } from '../logger.js';
-import { streamChatReply } from '../services/chat.js';
-import { resolveFallback, resolveModel } from '../services/model.js';
+import { streamChatTurn, getPendingTurnMessageId } from '../services/chat.js';
+import { resolveModel, resolveFallback } from '../services/model.js';
 import {
   appendAssistantMessage,
   applyTitleFromFirstUserMessage,
   syncMessages,
 } from '../services/message.js';
+import { resolvePendingDecision } from '../services/pending-confirm.js';
 import { findSession, touchSession } from '../services/session.js';
 
 /**
- * 对话网关 —— `/api/v1/chat`（SSE）+ `/api/v1/models`。
+ * 对话网关 —— `/api/v1/chat`（SSE）+ `/api/v1/chat/confirm`（人工确认）+ `/api/v1/models`。
  *
  * ⚠️ **无鉴权**（见 [12-a A1](../docs/12-a-需求-应用外壳与上下文.md)）——
  * 服务默认只听 `127.0.0.1`。
@@ -53,6 +54,12 @@ const chatRequestSchema = z.object({
   messageId: z.string().optional(),
   /** 会话 id（**前端建好会话后带进来**；没有就只聊天不落库） */
   sessionId: z.string().optional(),
+});
+
+/** 确认请求体 */
+const confirmRequestSchema = z.object({
+  sessionId: z.string().min(1),
+  approved: z.boolean(),
 });
 
 export const chatRouter = new Router({ prefix: '/api/v1' });
@@ -97,9 +104,14 @@ chatRouter.post('/chat', async (ctx) => {
 
   const abort = new AbortController();
 
-  const events = streamChatReply({
+  // ⚠️ **assistant 消息 id 先定下来** —— 图状态、工具流水、落库、
+  //    「重启后恢复」用的都是**这一个 id**（三处各生成一个会写成三条消息）
+  const assistantMessageId = nanoid();
+
+  const events = streamChatTurn({
     messages: parsed.data.messages,
-    model,
+    ...(sessionId ? { sessionId } : {}),
+    messageId: assistantMessageId,
     signal: abort.signal,
   });
 
@@ -129,9 +141,6 @@ chatRouter.post('/chat', async (ctx) => {
 
   // ⚠️ **落库的 parts 与推给前端的同源** —— 同一个累加器吃同一批 chunk
   const parts = createPartsAccumulator();
-  // ⚠️ **assistant 消息 id 由服务端生成** —— 随 `start` chunk 推给前端，
-  //    落库用同一个 id，两边对得上（消息级收藏点得中刚生成的那条）
-  const assistantMessageId = nanoid();
 
   void (async () => {
     try {
@@ -139,6 +148,21 @@ chatRouter.post('/chat', async (ctx) => {
         parts.add(chunk);
         if (!stream.write(`data: ${JSON.stringify(chunk)}\n\n`)) {
           await once(stream, 'drain');
+        }
+        // ⚠️ **挂起时先把部分内容落库** ——
+        //    「重启后待确认的卡片还在」靠的就是这一笔
+        //    （见 [12-b B5](../docs/12-b-需求-对话与编排.md)）
+        if (chunk.type === 'data-pending-confirm' && sessionId) {
+          try {
+            await appendAssistantMessage(sessionId, {
+              id: assistantMessageId,
+              content: parts.text(),
+              parts: parts.parts(),
+              metadata: { model: model.name, pendingConfirm: true },
+            });
+          } catch (err) {
+            logger.error({ err, sessionId }, '挂起时落库失败');
+          }
         }
       }
     } catch (err) {
@@ -178,6 +202,65 @@ chatRouter.post('/chat', async (ctx) => {
       }
     }
   })();
+});
+
+/**
+ * `POST /api/v1/chat/confirm` —— **人工确认闸的另一半**（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
+ *
+ * 两条路：
+ * 1. **进程里有人在等**（正常情况）→ 把决定送过去，**原来的 SSE 继续往下流**
+ * 2. **没人等**（后端重启过）→ 自己恢复图，把结果一次性返回
+ */
+chatRouter.post('/chat/confirm', async (ctx) => {
+  const parsed = confirmRequestSchema.safeParse(ctx.request.body);
+  if (!parsed.success) {
+    throw new AppError('INVALID_REQUEST', '请求体格式不对', 400);
+  }
+  const { sessionId, approved } = parsed.data;
+
+  const session = await findSession(sessionId);
+  if (!session) {
+    throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+  }
+
+  // ── 路 1：有人在等 ──
+  if (resolvePendingDecision(sessionId, { approved })) {
+    ctx.body = { ok: true, mode: 'resumed' };
+    return;
+  }
+
+  // ── 路 2：后端重启过 —— 自己恢复图 ──
+  const parts = createPartsAccumulator();
+  try {
+    const events = streamChatTurn({
+      sessionId,
+      messageId: nanoid(),
+      resume: { approved },
+    });
+    for await (const chunk of createChatEventStream({ events })) {
+      parts.add(chunk);
+    }
+  } catch (err) {
+    logger.error({ err, sessionId }, '恢复被挂起的对话失败');
+    throw new AppError('RESUME_FAILED', describeError(err), 500);
+  }
+
+  // ⚠️ **续跑的是同一条消息** —— 消息 id 存在检查点里，重启后还是同一个
+  const messageId = await getPendingTurnMessageId(sessionId);
+  if (messageId) {
+    try {
+      await appendAssistantMessage(sessionId, {
+        id: messageId,
+        content: parts.text(),
+        parts: parts.parts(),
+        metadata: { model: resolveModel()?.name ?? 'unknown' },
+      });
+    } catch (err) {
+      logger.error({ err, sessionId }, '恢复后落库失败');
+    }
+  }
+
+  ctx.body = { ok: true, mode: 'completed', text: parts.text(), parts: parts.parts() };
 });
 
 /**

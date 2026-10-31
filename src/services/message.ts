@@ -19,6 +19,10 @@ export interface UiPart {
   type: string;
   text?: string;
   state?: string;
+  /** 数据 part 的 id（**工具卡片靠它对齐**） */
+  id?: string;
+  /** 数据 part 的载荷（**工具卡片 / 待确认卡片**） */
+  data?: unknown;
 }
 
 /** 前端发来的消息（AI SDK UI Message 的最小形状） */
@@ -129,14 +133,16 @@ export async function syncMessages(sessionId: string, incoming: IncomingMessage[
  *
  * ⚠️ **`parts` 与推给前端的是同一份** —— 都来自同一批 chunk（见 [12-b B1](../docs/12-b-需求-对话与编排.md)）。
  * ⚠️ **`id` 用服务端生成的那个** —— 前端 `start` chunk 拿到的就是它，两边对得上。
+ *
+ * 📌 **同 id 就更新** —— 挂起时先落一笔（带待确认卡片），
+ * 恢复后再落一次（带最终内容），两次是同一条消息，不会多出一条。
  */
 export async function appendAssistantMessage(
   sessionId: string,
   input: { id: string; content: string; parts: UiPart[]; metadata?: Record<string, unknown> },
 ): Promise<void> {
   const now = utcNow();
-  await Message.create({
-    id: input.id,
+  const values = {
     session_id: sessionId,
     role: 'assistant',
     content: input.content,
@@ -144,10 +150,22 @@ export async function appendAssistantMessage(
     tool_calls: null,
     tool_results: null,
     attachments: null,
-    favorite: 0,
     metadata: input.metadata ? JSON.stringify(input.metadata) : null,
-    created_at: now,
     updated_at: now,
+  };
+
+  const existing = await Message.findByPk(input.id);
+  if (existing) {
+    existing.set(values);
+    await existing.save();
+    return;
+  }
+
+  await Message.create({
+    id: input.id,
+    ...values,
+    favorite: 0,
+    created_at: now,
   });
 }
 

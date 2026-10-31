@@ -19,6 +19,7 @@
     "start": "node dist/src/server.js",
     "migrate": "tsx scripts/migrate.ts",
     "migrate:undo": "tsx scripts/migrate.ts --undo",
+    "tool:logs": "tsx scripts/tool-logs.ts",
     "backup": "tsx scripts/backup.ts",
     "seed": "tsx scripts/seed.ts",
     "env:sync": "tsx scripts/sync-env.ts",

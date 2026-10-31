@@ -25,6 +25,27 @@ export function extractText(parts: Array<{ type: string; text?: string | undefin
     .join('');
 }
 
+/**
+ * 取一条消息的纯文本（**内容可能是数组形式** —— 多模态消息的内容是块数组）。
+ *
+ * ⚠️ **不能直接 `String(content)`** —— 数组会被 stringify 成 `[object Object]`。
+ */
+export function messageText(message: BaseMessage): string {
+  const content: unknown = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .map((part) => {
+      if (typeof part === 'string') return part;
+      if (part && typeof part === 'object' && 'text' in part) {
+        const text = (part as { text?: unknown }).text;
+        return typeof text === 'string' ? text : '';
+      }
+      return '';
+    })
+    .join('');
+}
+
 /** UI Message → LangChain Message（角色一一对应） */
 export function toLangChainMessages(messages: IncomingUiMessage[]): BaseMessage[] {
   const out: BaseMessage[] = [];

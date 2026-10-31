@@ -57,12 +57,14 @@ export interface SessionSummary {
   updatedAt: string | null;
 }
 
-/** 落库的 part（结构化卡片；后续工具卡片也走这里） */
+/** 落库的 part（结构化卡片；工具卡片也走这里） */
 export interface StoredPart {
   type: string;
   text?: string;
   state?: string;
   id?: string;
+  /** 数据 part 的载荷（**工具卡片 / 待确认卡片**） */
+  data?: unknown;
 }
 
 /** 一条消息 */
@@ -155,5 +157,36 @@ export async function toggleMessageFavorite(
   const { data } = await api.patch<StoredMessage>(`/messages/${id}/favorite`, {
     ...(favorite === undefined ? {} : { favorite }),
   });
+  return data;
+}
+
+/* ── 人工确认闸（见 [12-b B5](../../docs/12-b-需求-对话与编排.md)） ───────────── */
+
+/** 确认结果 */
+export interface ConfirmResponse {
+  ok: boolean;
+  /**
+   * - `resumed` —— **原来的流还在跑**，批准后它会接着往下流
+   * - `completed` —— **后端重启过**，这次已经把剩下的跑完了（`parts` 是结果）
+   */
+  mode: 'resumed' | 'completed';
+  text?: string;
+  parts?: StoredPart[];
+}
+
+/**
+ * 批准 / 取消一次危险操作。
+ *
+ * ⚠️ **超时给长一点** —— `completed` 那条路要把剩下的对话跑完。
+ */
+export async function confirmToolCall(
+  sessionId: string,
+  approved: boolean,
+): Promise<ConfirmResponse> {
+  const { data } = await api.post<ConfirmResponse>(
+    '/chat/confirm',
+    { sessionId, approved },
+    { timeout: 180_000 },
+  );
   return data;
 }

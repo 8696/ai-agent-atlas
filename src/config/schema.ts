@@ -75,6 +75,16 @@ export const envSchema = z.object({
   SUMMARY_TOKEN_BUDGET: z.coerce.number().int().positive().default(2000),
   TOOL_OUTPUT_MAX_CHARS: z.coerce.number().int().positive().default(4000),
   TOOL_OUTPUT_TRUNCATE: z.enum(['head', 'tail']).default('tail'),
+  /**
+   * ⚠️ **同一个工具连续调用几次就停**（默认 2）——
+   * 模型陷入死循环时，这是唯一的刹车（见 [12-b B4](./12-b-需求-对话与编排.md)）。
+   */
+  SAME_TOOL_REPEAT_LIMIT: z.coerce.number().int().min(1).default(2),
+  /**
+   * 联网搜索后端（SearXNG 兼容，形如 `http://127.0.0.1:8888/search`）。
+   * ⚠️ **留空 = 不注册 `web_search` 工具** —— 模型看不到一个必然失败的工具。
+   */
+  WEB_SEARCH_URL: z.string().optional(),
   /** 会话保留天数（超期连同消息一起清掉；收藏的会话不清） */
   SESSION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 

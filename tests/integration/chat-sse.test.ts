@@ -42,22 +42,27 @@ vi.mock('../../src/services/model', async () => {
       thinkingBudget: 0,
     }),
     resolveFallback: () => undefined,
-    createChatModel: () => ({
-      stream: async function* (
-        messages: StreamCall['messages'],
-        options?: { signal?: AbortSignal },
-      ) {
-        calls.push({ messages, ...(options?.signal ? { signal: options.signal } : {}) });
-        for (const piece of ['你', '好']) {
-          await new Promise((resolve) => setTimeout(resolve, pieceDelayMs));
-          if (options?.signal?.aborted) {
-            aborted = true;
-            return;
+    createChatModel: () => {
+      // ⚠️ **`bindTools` 要有** —— 图的 plan 节点会绑工具再调模型
+      const model = {
+        bindTools: () => model,
+        stream: async function* (
+          messages: StreamCall['messages'],
+          options?: { signal?: AbortSignal },
+        ) {
+          calls.push({ messages, ...(options?.signal ? { signal: options.signal } : {}) });
+          for (const piece of ['你', '好']) {
+            await new Promise((resolve) => setTimeout(resolve, pieceDelayMs));
+            if (options?.signal?.aborted) {
+              aborted = true;
+              return;
+            }
+            yield { text: piece };
           }
-          yield { text: piece };
-        }
-      },
-    }),
+        },
+      };
+      return model;
+    },
   };
 });
 

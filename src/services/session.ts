@@ -5,6 +5,7 @@ import { sequelize } from '../db.js';
 import { Message } from '../models/message.model.js';
 import { Session } from '../models/session.model.js';
 import { utcDaysAgo, utcNow, utcToIso } from '../lib/time.js';
+import { clearPending } from './pending-confirm.js';
 import { DEFAULT_TITLE } from '../lib/session-title.js';
 
 /**
@@ -171,16 +172,27 @@ export async function deleteSession(id: string): Promise<boolean> {
   const session = await findSession(id);
   if (!session) return false;
 
+  // ⚠️ **挂起中的确认要清掉** —— 否则那个请求会一直等到超时
+  clearPending(id);
+
   // ⚠️ **表存在性在事务外查** —— 事务里再发一次查询会二次占用连接
   //    （连接池 `max: 1`，多一次占用就多一份等锁的 risk）
   const hasToolLogs = await tableExists('tool_call_logs');
   const hasCheckpoints = await tableExists('graph_checkpoints');
+  const hasCheckpointWrites = await tableExists('graph_checkpoint_writes');
 
   await sequelize.transaction(async (transaction) => {
     await Message.destroy({ where: { session_id: id }, transaction });
 
     if (hasToolLogs) {
       await sequelize.query('DELETE FROM tool_call_logs WHERE session_id = :id', {
+        replacements: { id },
+        transaction,
+      });
+    }
+    if (hasCheckpointWrites) {
+      // ⚠️ **待写入也要清** —— 它跟检查点是一对，清一半会留下孤儿行
+      await sequelize.query('DELETE FROM graph_checkpoint_writes WHERE thread_id = :id', {
         replacements: { id },
         transaction,
       });

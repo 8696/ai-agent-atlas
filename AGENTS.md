@@ -38,10 +38,14 @@
 | 危险能力     | 有（Shell / 写文件 / 出网 / 浏览器）→ **必须有确认闸** | 基本没有            |
 | 扩展方向     | Skill · MCP · 长期记忆 · 多代理 · 定时任务     | 业务系统对接                 |
 
-**当前状态**：**阶段 0「先能聊」快做完了** —— 26 份规格文档已写完，
-**「打开网页就能跟模型对话」这条竖切已跑通**，
-**会话也落库了**（A1 / B2 = ✅ · A2 / A3 / A4 / B1 / B8 = 🟡，
-见 [12-e §E5](./docs/12-e-需求-观测安全与验收.md)）。
+**当前状态**：**阶段 0 完成，阶段 1「能干活」做了一半**（2026-10）——
+**「打开网页就能跟模型对话」这条竖切已跑通**，**会话也落库了**，
+**而且现在它真的能干活了**：调工具、跑命令、危险操作先问人、
+后端重启能接着跑（见 [12-e §E5](./docs/12-e-需求-观测安全与验收.md)）。
+
+- 阶段 0：A1 / B2 = ✅ · A2 / A3 / A4 / B1 / B8 = 🟡 · A5 = ⬜
+- 阶段 1：**B4 / B6 = ✅** · B3 / B5 / B7 / C1 / C2 / C3 / C6 / E4 = 🟡
+  （**C2 是 10 / 15 个工具** —— 1c 批次还没做）
 
 已就位的部分：
 
@@ -59,10 +63,19 @@
     `src/services/message.ts`（消息与 `parts` 落库 + **对账**）
   - 网关 `/api/v1/sessions` · `/api/v1/messages/:id/favorite`
   - 前端侧栏会话列表 · `/sessions` 历史会话页 · 聊天页会话感知（`?session=` / `?q=`）
+- **工具与编排层（已跑通）**：
+  - 图 `src/agent/graph.ts`（`prepare → plan → tools → plan → … → answer`）·
+    状态 `src/agent/state.ts` · 检查点 `src/agent/checkpointer.ts`（**自己的 SQLite saver**）
+  - 工具池 `src/tools/registry.ts`（统一注册表 + 冲突改名 / 拒绝注册）·
+    裁剪 `src/tools/selection.ts`（按相关度取 top N）
+  - **10 个内置工具**：`src/tools/builtin/`（fs 5 · shell · http 3 · time）
+  - 权限闸 `src/lib/security/`（路径沙箱 · 出网校验 · 命令黑名单 · 敏感档 · 注入检测 · 脱敏）
+  - **人工确认闸** `src/agent/tool-node.ts`（`interrupt()` 挂起 → `Command({ resume })` 恢复）
+  - 工具卡片 `web/pages/chat/ToolCallCard.tsx` · 流水 `yarn tool:logs`
 - 文档：26 份（01 ~ 13，含子文档）+ 本文件 + README
 
-**未交付**：A5 · **B3 ~ B6（LangGraph 图 / 工具循环 / 人工确认闸 / 检查点）** ·
-B7 · B9 ~ B11 · C1 ~ C6 · D1 ~ D4 · E4。
+**未交付**：A5 · B9 ~ B11 · **C2 的 1c 批次**（浏览器 / 沙箱代码 / 媒体）·
+C4 · C5 · D1 ~ D4。
 
 ---
 
@@ -325,6 +338,11 @@ yarn env:check
 - ⚠️ **所有工具执行必须经 `agent/tool-node.ts`** —— 在图节点里直接
   `await tool.invoke()` = 绕过人工确认闸 = 开后门
 - ⚠️ **checkpointer 必须落盘**（SQLite）—— 进程内 MemorySaver = 重启后状态全丢
+- ⚠️ **LangGraph 1.5.3 的 `writer()` 读错了配置键** —— 节点里要用
+  `getWriter(config)`，否则事件**静默丢失**
+  （见 [03-b §B.5.3.1](./docs/03-b-技术栈-后端栈.md)）
+- ⚠️ **一次节点执行 = 一个工具调用 = 一个确认点** ——
+  在一个节点里循环调多个工具，恢复时**会执行第二遍**
 - ⚠️ **AI SDK 只用于协议**（前端 `useChat`），
   模型调用走 **LangChain 的 ChatModel** —— 后端不要用 `streamText` 起第二套流式栈
 - ⚠️ **工具名全局唯一**，Skill / MCP 的工具冲突要拒绝注册并报告，不静默覆盖

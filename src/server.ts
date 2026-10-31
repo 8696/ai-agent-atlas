@@ -3,6 +3,7 @@ import { logger } from './logger.js';
 import { initDatabase } from './db.js';
 import { createApp } from './app.js';
 import { describeBoundary } from './lib/boundary.js';
+import { getToolRegistry } from './tools/registry.js';
 import { purgeExpiredSessions } from './services/session.js';
 
 /**
@@ -26,6 +27,16 @@ function printBoundaryNotice(): void {
 
 async function main() {
   await initDatabase();
+
+  // ⚠️ **启动即校验工具池** —— 两个内置工具重名是代码错误，
+  //    **启动就失败**，不要等第一次对话才发现（见 [12-c C1](./docs/12-c-需求-工具技能与扩展.md)）
+  try {
+    const registry = getToolRegistry();
+    logger.info({ count: registry.list().length, tools: registry.names() }, '工具池已就绪');
+  } catch (err) {
+    console.error(`\n[Atlas] 工具池初始化失败：${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+  }
 
   // ⚠️ **会话保留期清理** —— 超期的会话连同消息一起清掉（见 [12-b B2](./docs/12-b-需求-对话与编排.md)）
   try {

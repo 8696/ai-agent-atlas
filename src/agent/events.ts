@@ -1,7 +1,5 @@
 import type { UIMessageChunk } from 'ai';
 import type { ChatEvent } from '../services/chat.js';
-
-export type { ChatEvent };
 import { sanitizeMessage } from '../lib/errors.js';
 
 /**
@@ -18,12 +16,17 @@ import { sanitizeMessage } from '../lib/errors.js';
  * | 思考开始 / 结束 | `reasoning-start` / `reasoning-end` | —           |
  * | 文本增量        | `text-delta`              | 气泡里逐字出现     |
  * | 文本开始 / 结束 | `text-start` / `text-end`  | —                  |
+ * | 工具调用        | `data-tool-call`          | 工具卡片           |
+ * | 需要人工确认    | `data-pending-confirm`    | 卡片出现「批准 / 取消」 |
+ * | 命中步骤上限    | `data-notice`             | 一行提示           |
  * | 图结束          | `finish`                  | 结束 loading 状态  |
  * | 出错            | `error`                   | 显示错误原因       |
  *
  * ⚠️ **这里产出的是「chunk 对象」**，SSE 的封装（`data: ...\n\n`）在网关层做 ——
  * 协议与传输分开，换传输方式时不用动这里。
  */
+
+export type { ChatEvent };
 
 /** 文本块的 id —— 一个 assistant 消息里只有一段正文，用固定 id 即可 */
 const TEXT_PART_ID = '0';
@@ -79,6 +82,36 @@ export async function* createChatEventStream(
         continue;
       }
 
+      if (event.type === 'tool-call') {
+        yield* closeReasoning();
+        yield {
+          type: 'data-tool-call',
+          id: `tool:${event.card.toolCallId}`,
+          data: event.card,
+        };
+        continue;
+      }
+
+      if (event.type === 'pending-confirm') {
+        yield* closeReasoning();
+        yield {
+          type: 'data-pending-confirm',
+          id: `confirm:${event.payload.toolCallId}`,
+          data: event.payload,
+        };
+        continue;
+      }
+
+      if (event.type === 'notice') {
+        yield* closeReasoning();
+        yield {
+          type: 'data-notice',
+          id: `notice:${event.text.slice(0, 32)}`,
+          data: { text: event.text },
+        };
+        continue;
+      }
+
       yield* closeReasoning();
       if (!textStarted) {
         yield { type: 'text-start', id: TEXT_PART_ID };
@@ -108,13 +141,9 @@ export function describeError(error: unknown): string {
  * 落库的 parts 与推给前端的如果不是同一份，
  * 刷新后卡片内容就会变（用户看到「刷新一下答案不一样」）。
  */
-export interface PersistedPart {
-  type: 'text' | 'reasoning';
-  text: string;
-  state: 'done';
-  /** 思考块的 id（前端渲染按 id 分块） */
-  id?: string;
-}
+export type PersistedPart =
+  | { type: 'text' | 'reasoning'; text: string; state: 'done'; id?: string }
+  | { type: 'data-tool-call' | 'data-pending-confirm' | 'data-notice'; id?: string; data: unknown };
 
 /** part 累加器 —— **吃的是往 SSE 写出去的同一批 chunk** */
 export interface PartsAccumulator {
@@ -126,9 +155,11 @@ export interface PartsAccumulator {
 }
 
 interface PartSlot {
-  kind: 'text' | 'reasoning';
+  kind: 'text' | 'reasoning' | 'data';
   id: string;
   text: string;
+  type?: string;
+  data?: unknown;
 }
 
 /**
@@ -158,17 +189,38 @@ export function createPartsAccumulator(): PartsAccumulator {
         ensure('reasoning', chunk.id);
       } else if (chunk.type === 'reasoning-delta') {
         ensure('reasoning', chunk.id).text += chunk.delta;
+      } else if (chunk.type === 'data-tool-call' || chunk.type === 'data-pending-confirm' || chunk.type === 'data-notice') {
+        // 📌 **数据 part 原样存** —— 工具卡片刷新后还在
+        const id = chunk.id ?? `${chunk.type}`;
+        const found = slots.find((slot) => slot.kind === 'data' && slot.id === id);
+        if (found) {
+          found.data = chunk.data;
+          found.type = chunk.type;
+        } else {
+          slots.push({ kind: 'data', id, text: '', type: chunk.type, data: chunk.data });
+        }
       }
       // ⚠️ `text-end` / `reasoning-end` 只是收尾 —— 内容已经在 delta 里攒好了
     },
     parts(): PersistedPart[] {
-      return slots
-        .filter((slot) => slot.text.length > 0)
-        .map((slot) =>
+      const out: PersistedPart[] = [];
+      for (const slot of slots) {
+        if (slot.kind === 'data') {
+          out.push({
+            type: (slot.type ?? 'data-notice') as 'data-tool-call' | 'data-pending-confirm' | 'data-notice',
+            ...(slot.id ? { id: slot.id } : {}),
+            data: slot.data,
+          });
+          continue;
+        }
+        if (slot.text.length === 0) continue;
+        out.push(
           slot.kind === 'reasoning'
             ? { type: 'reasoning', text: slot.text, state: 'done', id: slot.id }
             : { type: 'text', text: slot.text, state: 'done' },
         );
+      }
+      return out;
     },
     text(): string {
       return slots

@@ -1,7 +1,9 @@
 import { Sequelize } from 'sequelize-typescript';
 import { paths } from './config.js';
+import { AuditLog, auditLogAttributes } from './models/audit-log.model.js';
 import { Message, messageAttributes } from './models/message.model.js';
 import { Session, sessionAttributes } from './models/session.model.js';
+import { ToolCallLog, toolCallLogAttributes } from './models/tool-call-log.model.js';
 
 /**
  * 业务库连接（SQLite）。
@@ -36,6 +38,16 @@ Session.initialize(sessionAttributes, {
 Message.initialize(messageAttributes, {
   sequelize,
   tableName: 'messages',
+  timestamps: false,
+});
+ToolCallLog.initialize(toolCallLogAttributes, {
+  sequelize,
+  tableName: 'tool_call_logs',
+  timestamps: false,
+});
+AuditLog.initialize(auditLogAttributes, {
+  sequelize,
+  tableName: 'audit_logs',
   timestamps: false,
 });
 

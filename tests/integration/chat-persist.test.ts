@@ -29,14 +29,19 @@ vi.mock('../../src/services/model', async () => {
       thinkingBudget: 0,
     }),
     resolveFallback: () => undefined,
-    createChatModel: () => ({
-      stream: async function* () {
-        for (const piece of ['你', '好']) {
-          await new Promise((resolve) => setTimeout(resolve, 5));
-          yield { text: piece };
-        }
-      },
-    }),
+    createChatModel: () => {
+      // ⚠️ **`bindTools` 要有** —— 图的 plan 节点会绑工具再调模型
+      const model = {
+        bindTools: () => model,
+        stream: async function* () {
+          for (const piece of ['你', '好']) {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            yield { text: piece };
+          }
+        },
+      };
+      return model;
+    },
   };
 });
 

@@ -9,7 +9,7 @@ import { MessageList } from './MessageList';
 import { toUserMessage } from '../../lib/apiError';
 import { useModelStore } from '../../lib/stores/modelStore';
 import { useSessionStore } from '../../lib/stores/sessionStore';
-import { createSession, fetchSession, toggleMessageFavorite } from '../../lib/api';
+import { createSession, confirmToolCall, fetchSession, toggleMessageFavorite } from '../../lib/api';
 import type { StoredMessage } from '../../lib/api';
 
 /**
@@ -203,6 +203,42 @@ export function ChatPage() {
     [favorites],
   );
 
+  /** 人工确认（**批准 / 取消**） */
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState('');
+  const handleConfirm = useCallback(
+    async (approved: boolean) => {
+      if (!sessionId || confirming) return;
+      setConfirming(true);
+      setConfirmError('');
+      try {
+        const result = await confirmToolCall(sessionId, approved);
+        // ⚠️ **`resumed` = 原来的流还在跑** —— 它会接着往下流，这里不用管
+        // ⚠️ **`completed` = 后端重启过** —— 剩下的已经跑完，把结果并回那条消息
+        if (result.mode === 'completed' && result.parts) {
+          setMessages((prev) =>
+            prev.map((message) => {
+              const hasPending = message.parts.some(
+                (part) => part.type === 'data-pending-confirm',
+              );
+              if (!hasPending) return message;
+              const kept = message.parts.filter((part) => part.type !== 'data-pending-confirm');
+              return {
+                ...message,
+                parts: [...kept, ...(result.parts as UIMessage['parts'])],
+              };
+            }),
+          );
+        }
+      } catch (err) {
+        setConfirmError(err instanceof Error ? err.message : '确认失败，请重试');
+      } finally {
+        setConfirming(false);
+      }
+    },
+    [confirming, sessionId, setMessages],
+  );
+
   const busy = status === 'submitted' || status === 'streaming';
   const errorText = error ? toUserMessage(error) : '';
 
@@ -265,6 +301,21 @@ export function ChatPage() {
         />
       ) : null}
 
+      {confirmError ? (
+        <Alert
+          type="error"
+          showIcon
+          title="确认没送出去"
+          description={confirmError}
+          action={
+            <Button size="small" onClick={() => setConfirmError('')}>
+              知道了
+            </Button>
+          }
+          style={{ marginBottom: 12 }}
+        />
+      ) : null}
+
       <div ref={scrollRef} className="atlas-chat-scroll">
         {loadingModels && messages.length === 0 ? (
           <div style={{ padding: '48px 0', textAlign: 'center' }}>
@@ -278,6 +329,8 @@ export function ChatPage() {
             onRegenerate={regenerateAnswer}
             onToggleFavorite={(messageId) => void toggleFavorite(messageId)}
             onPickSuggestion={(text) => void submit(text)}
+            onConfirm={(approved) => void handleConfirm(approved)}
+            confirming={confirming}
           />
         )}
       </div>

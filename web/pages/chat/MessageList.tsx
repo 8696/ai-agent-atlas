@@ -3,6 +3,13 @@ import { Button, Spin } from 'antd';
 import { ArrowRightOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
+import {
+  NoticeLine,
+  PendingConfirmCard,
+  ToolCallCard,
+  type PendingConfirmData,
+  type ToolCardData,
+} from './ToolCallCard';
 
 /**
  * 消息区（见 [04-b §4.1.1](../docs/04-b-ui-聊天页.md)）。
@@ -13,6 +20,7 @@ import { Markdown } from '../../components/Markdown';
  * | AI 气泡 | 左对齐，**不拉满整行**（拉满 = 一大块空白） |
  * | 重新生成 | 在**最后一条 AI 消息**上，**必须传 messageId** |
  * | 📌 收藏 | 在 AI 消息右上角（**消息级收藏**，见 §4.2）   |
+ * | 工具卡片 | 在**正文上方**，按发生顺序排列（见 [12-b B7](../docs/12-b-需求-对话与编排.md)） |
  */
 
 interface Props {
@@ -25,6 +33,10 @@ interface Props {
   onToggleFavorite: (messageId: string) => void;
   /** 点建议问题 → 直接发出去 */
   onPickSuggestion?: (text: string) => void;
+  /** 人工确认（**批准 / 取消**） */
+  onConfirm?: (approved: boolean, toolCallId: string) => void;
+  /** 确认处理中（**禁用按钮**） */
+  confirming?: boolean;
 }
 
 const SUGGESTIONS = [
@@ -38,6 +50,71 @@ function partText(message: UIMessage, type: 'text' | 'reasoning'): string {
     .filter((part) => part.type === type)
     .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
     .join('');
+}
+
+/**
+ * 把一条消息的 part 拆成**按顺序的块**。
+ *
+ * ⚠️ **连续的文本 part 合成一块** —— 否则每段话都要包一次 Markdown。
+ * ⚠️ **工具卡片 / 待确认卡片按出现顺序插在中间** —— 卡片要贴着它对应的上下文。
+ */
+type Block =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; card: ToolCardData }
+  | { kind: 'confirm'; payload: PendingConfirmData; resolved: boolean }
+  | { kind: 'notice'; text: string };
+
+function toBlocks(message: UIMessage): Block[] {
+  const blocks: Block[] = [];
+  let buffer = '';
+
+  // ⚠️ **已经跑过的工具调用** —— 确认卡片对应的工具如果已经有结果卡片了，
+  //    那次确认**已经处理过**，不该还能再点（刷新后仍能点会重复批准）
+  const executedToolCalls = new Set(
+    message.parts.flatMap((part) => {
+      if (part.type !== 'data-tool-call') return [];
+      const data = part.data as ToolCardData | undefined;
+      return data?.toolCallId ? [data.toolCallId] : [];
+    }),
+  );
+
+  const flush = () => {
+    if (buffer !== '') {
+      blocks.push({ kind: 'text', text: buffer });
+      buffer = '';
+    }
+  };
+
+  for (const part of message.parts) {
+    if (part.type === 'text') {
+      const text = 'text' in part && typeof part.text === 'string' ? part.text : '';
+      buffer += text;
+      continue;
+    }
+    if (part.type === 'data-tool-call') {
+      flush();
+      blocks.push({ kind: 'tool', card: part.data as ToolCardData });
+      continue;
+    }
+    if (part.type === 'data-pending-confirm') {
+      flush();
+      const payload = part.data as PendingConfirmData;
+      blocks.push({
+        kind: 'confirm',
+        payload,
+        resolved: executedToolCalls.has(payload.toolCallId),
+      });
+      continue;
+    }
+    if (part.type === 'data-notice') {
+      flush();
+      const data = part.data as { text?: string };
+      blocks.push({ kind: 'notice', text: data?.text ?? '' });
+      continue;
+    }
+  }
+  flush();
+  return blocks;
 }
 
 function Caret() {
@@ -89,6 +166,8 @@ export function MessageList({
   onRegenerate,
   onToggleFavorite,
   onPickSuggestion,
+  onConfirm,
+  confirming,
 }: Props) {
   const lastAssistantId = useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -131,6 +210,7 @@ export function MessageList({
         const isUser = message.role === 'user';
         const streaming = status === 'streaming' && message.id === lastAssistantId;
         const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
+        const blocks = toBlocks(message);
 
         if (isUser) {
           return (
@@ -150,13 +230,38 @@ export function MessageList({
             </div>
             <div className="atlas-ai-body">
               <ThinkingTrace text={reasoning} live={reasoningLive} />
-              {text ? (
-                <div className="atlas-answer atlas-markdown">
-                  <Markdown>{text}</Markdown>
-                  {streaming ? <Caret /> : null}
-                </div>
-              ) : null}
-              {streaming && !text ? <Spin size="small" /> : null}
+              {blocks.map((block, index) => {
+                if (block.kind === 'tool') {
+                  return (
+                    <ToolCallCard
+                      key={`tool-${block.card.toolCallId}-${index}`}
+                      card={block.card}
+                    />
+                  );
+                }
+                if (block.kind === 'confirm') {
+                  return (
+                    <PendingConfirmCard
+                      key={`confirm-${block.payload.toolCallId}-${index}`}
+                      payload={block.payload}
+                      busy={confirming}
+                      resolved={block.resolved}
+                      onConfirm={(approved) => onConfirm?.(approved, block.payload.toolCallId)}
+                    />
+                  );
+                }
+                if (block.kind === 'notice') {
+                  return <NoticeLine key={`notice-${index}`} text={block.text} />;
+                }
+                const last = index === blocks.length - 1;
+                return (
+                  <div key={`text-${index}`} className="atlas-answer atlas-markdown">
+                    <Markdown>{block.text}</Markdown>
+                    {streaming && last ? <Caret /> : null}
+                  </div>
+                );
+              })}
+              {streaming && blocks.length === 0 ? <Spin size="small" /> : null}
               <div className="atlas-ai-tools">
                 {/* 📌 消息级收藏（见 [04-b §4.2](../docs/04-b-ui-聊天页.md)） */}
                 <Button
