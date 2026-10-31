@@ -27,10 +27,9 @@ vi.mock('../../src/logger', () => ({
 }));
 
 vi.mock('../../src/services/model', async () => {
-  const actual =
-    await vi.importActual<typeof import('../../src/services/model')>(
-      '../../src/services/model',
-    );
+  const actual = await vi.importActual<typeof import('../../src/services/model')>(
+    '../../src/services/model',
+  );
   return {
     ...actual,
     resolveModel: () => ({
@@ -44,7 +43,10 @@ vi.mock('../../src/services/model', async () => {
     }),
     resolveFallback: () => undefined,
     createChatModel: () => ({
-      stream: async function* (messages: StreamCall['messages'], options?: { signal?: AbortSignal }) {
+      stream: async function* (
+        messages: StreamCall['messages'],
+        options?: { signal?: AbortSignal },
+      ) {
         calls.push({ messages, ...(options?.signal ? { signal: options.signal } : {}) });
         for (const piece of ['你', '好']) {
           await new Promise((resolve) => setTimeout(resolve, pieceDelayMs));

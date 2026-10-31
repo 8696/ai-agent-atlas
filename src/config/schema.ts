@@ -16,10 +16,7 @@ import { z } from 'zod';
  *  必须自己处理。 */
 export const boolFromEnv = (defaultValue: boolean) =>
   z
-    .preprocess(
-      (v) => (typeof v === 'string' ? v.trim().toLowerCase() === 'true' : v),
-      z.boolean(),
-    )
+    .preprocess((v) => (typeof v === 'string' ? v.trim().toLowerCase() === 'true' : v), z.boolean())
     .default(defaultValue);
 
 export const envSchema = z.object({
@@ -116,8 +113,7 @@ export const envSchema = z.object({
 export type Env = z.infer<typeof envSchema>;
 
 /** envSchema 声明的全部 key（**顺序 = `.env` 里的顺序**） */
-export const ENV_KEYS = Object.keys(envSchema.shape) as (keyof Env & string)[];
-
+export const ENV_KEYS = Object.keys(envSchema.shape) as (keyof Env)[];
 
 /** ⚠️ **跨字段校验**：zod 的 `superRefine` 在 `transform` 之后跑，
  *  但模型唯一性 / 备用模型指向这类约束要在解析后单独检查。 */

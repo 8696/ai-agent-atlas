@@ -17,7 +17,9 @@ export function SessionsPage() {
       <header className="atlas-sessions-head">
         <div>
           <h1>历史会话</h1>
-          <p>对话暂时只留在当前聊天页，刷新就会清掉。会话落库之后，可以在这里按标题搜索、只看收藏。</p>
+          <p>
+            对话暂时只留在当前聊天页，刷新就会清掉。会话落库之后，可以在这里按标题搜索、只看收藏。
+          </p>
         </div>
       </header>
 
@@ -39,7 +41,12 @@ export function SessionsPage() {
             image={<HistoryOutlined style={{ fontSize: 42, color: 'var(--atlas-muted)' }} />}
             description="还没有可筛选的会话"
           >
-            <Button type="primary" onClick={() => navigate('/chat')}>
+            <Button
+              type="primary"
+              onClick={() => {
+                void navigate('/chat');
+              }}
+            >
               去聊天
             </Button>
           </Empty>

@@ -1,8 +1,8 @@
 import { SystemMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
-import { createChatModel, type ResolvedModel } from './model';
-import { buildSystemPrompt } from './prompt';
-import { toLangChainMessages, type IncomingUiMessage } from './chat-messages';
+import { createChatModel, type ResolvedModel } from './model.js';
+import { buildSystemPrompt } from './prompt.js';
+import { toLangChainMessages, type IncomingUiMessage } from './chat-messages.js';
 
 /**
  * 对话编排 —— **一条「问模型 → 出字」的入口**。
@@ -17,12 +17,11 @@ import { toLangChainMessages, type IncomingUiMessage } from './chat-messages';
  * 将来换成图驱动时**只换这一层的内部实现**，前端协议不动。
  */
 
-export type { IncomingUiMessage } from './chat-messages';
+export type { IncomingUiMessage } from './chat-messages.js';
 
 /** 一轮对话的事件（**图事件的最小形状** —— 将来图驱动时从这里长出来） */
 export type ChatEvent =
-  | { type: 'text-delta'; delta: string }
-  | { type: 'reasoning-delta'; delta: string };
+  { type: 'text-delta'; delta: string } | { type: 'reasoning-delta'; delta: string };
 
 /**
  * 从一块模型增量里取出思考文本。
@@ -59,9 +58,7 @@ export interface StreamChatOptions {
  *
  * ⚠️ **异常不吞** —— 往上抛，由协议层翻译成 `error` part 推给前端。
  */
-export async function* streamChatReply(
-  options: StreamChatOptions,
-): AsyncGenerator<ChatEvent> {
+export async function* streamChatReply(options: StreamChatOptions): AsyncGenerator<ChatEvent> {
   const systemPrompt = buildSystemPrompt();
   const history = toLangChainMessages(options.messages);
 

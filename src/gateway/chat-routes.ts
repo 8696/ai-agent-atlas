@@ -2,11 +2,11 @@ import { once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import Router from '@koa/router';
 import { z } from 'zod';
-import { createChatEventStream, describeError } from '../agent/events';
-import { AppError } from '../lib/errors';
-import { logger } from '../logger';
-import { streamChatReply } from '../services/chat';
-import { resolveFallback, resolveModel } from '../services/model';
+import { createChatEventStream, describeError } from '../agent/events.js';
+import { AppError } from '../lib/errors.js';
+import { logger } from '../logger.js';
+import { streamChatReply } from '../services/chat.js';
+import { resolveFallback, resolveModel } from '../services/model.js';
 
 /**
  * 对话网关 —— `/api/v1/chat`（SSE）+ `/api/v1/models`。
@@ -54,7 +54,9 @@ export const chatRouter = new Router({ prefix: '/api/v1' });
  * ⚠️ **没配模型 → 503**（不是 500）：这是**运行时状态**，用户要做的是改 `.env` 的
  * `LLM_MODEL`（见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）。
  */
-chatRouter.post('/chat', async (ctx) => {
+// ⚠️ **这个处理器本身是同步的** —— 它把响应流挂好就返回，
+//    真正的流式循环在下面的 `void (async () => {...})()` 里跑（不占着 Koa 的 Promise）。
+chatRouter.post('/chat', (ctx) => {
   const parsed = chatRequestSchema.safeParse(ctx.request.body);
   if (!parsed.success) {
     throw new AppError('INVALID_REQUEST', '请求体格式不对', 400);

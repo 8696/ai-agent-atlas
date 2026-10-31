@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import hljs from 'highlight.js/lib/common';
 import { Button, Tooltip, theme } from 'antd';
@@ -13,6 +13,17 @@ import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
  * ⚠️ **高亮配色跟着主题走** —— 颜色写在 `styles/global.css` 的 CSS 变量里，
  * 切深色时不用重新加载 CSS。
  */
+
+/**
+ * react-markdown 的 `children` 是 `ReactNode` —— 可能是字符串、数组或元素。
+ * ⚠️ **不能直接 `String(children)`** —— 元素会变成 `"[object Object]"`，
+ *    数组会被逗号串起来，两种都会混进代码块里。递归只取纯文本。
+ */
+function textOf(node: ReactNode): string {
+  if (typeof node === 'string') return node;
+  if (Array.isArray(node)) return node.map(textOf).join('');
+  return '';
+}
 
 function CodeBlock({ html, raw, language }: { html: string; raw: string; language: string }) {
   const [copied, setCopied] = useState(false);
@@ -46,7 +57,9 @@ function CodeBlock({ html, raw, language }: { html: string; raw: string; languag
             type="text"
             aria-label="复制代码"
             icon={copied ? <CheckOutlined /> : <CopyOutlined />}
-            onClick={copy}
+            onClick={() => {
+              void copy();
+            }}
           />
         </Tooltip>
       </div>
@@ -64,7 +77,7 @@ export function Markdown({ children }: { children: string }) {
         // ⚠️ 代码块自己渲染 —— 不要再套一层 <pre>
         pre: ({ children }) => <>{children}</>,
         code: ({ className, children }) => {
-          const raw = String(children).replace(/\n$/, '');
+          const raw = textOf(children).replace(/\n$/, '');
           const match = /language-([A-Za-z0-9+#-]+)/.exec(className ?? '');
           if (!match) {
             return <code className="atlas-inline-code">{children}</code>;

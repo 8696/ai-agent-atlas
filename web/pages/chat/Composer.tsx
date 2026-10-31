@@ -21,12 +21,7 @@ interface Props {
   onStop: () => void;
 }
 
-export function Composer({
-  busy,
-  disabled = false,
-  onSubmit,
-  onStop,
-}: Props) {
+export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
   const [value, setValue] = useState('');
   const canSend = !disabled && value.trim().length > 0;
 

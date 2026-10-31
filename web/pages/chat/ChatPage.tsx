@@ -19,8 +19,9 @@ export function ChatPage() {
   // ⚠️ **transport 只建一次** —— 每次渲染新建会让 useChat 重新发请求
   const transport = useMemo(() => new DefaultChatTransport({ api: '/api/v1/chat' }), []);
 
-  const { messages, sendMessage, status, stop, error, regenerate, clearError } =
-    useChat({ transport });
+  const { messages, sendMessage, status, stop, error, regenerate, clearError } = useChat({
+    transport,
+  });
 
   const configured = useModelStore((state) => state.configured);
   const loadingModels = useModelStore((state) => state.loading);
@@ -119,12 +120,7 @@ export function ChatPage() {
         )}
       </div>
 
-      <Composer
-        busy={busy}
-        disabled={!configured}
-        onSubmit={submit}
-        onStop={() => void stop()}
-      />
+      <Composer busy={busy} disabled={!configured} onSubmit={submit} onStop={() => void stop()} />
     </div>
   );
 }

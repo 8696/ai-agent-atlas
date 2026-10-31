@@ -51,7 +51,9 @@ export function Sidebar() {
             type="primary"
             block
             icon={<PlusOutlined />}
-            onClick={() => navigate('/chat')}
+            onClick={() => {
+              void navigate('/chat');
+            }}
             aria-label="新对话"
           >
             {collapsed ? null : '新对话'}
@@ -62,7 +64,9 @@ export function Sidebar() {
           mode="inline"
           inlineCollapsed={collapsed}
           selectedKeys={[selectedKey]}
-          onClick={({ key }) => navigate(key === 'sessions' ? '/sessions' : '/chat')}
+          onClick={({ key }) => {
+            void navigate(key === 'sessions' ? '/sessions' : '/chat');
+          }}
           style={{ borderInlineEnd: 'none', flex: 1, overflowY: 'auto', background: 'transparent' }}
           items={[
             { key: 'chat', icon: <MessageOutlined />, label: '聊天' },

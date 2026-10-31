@@ -1,6 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIRS, FILES } from './paths';
+import { DIRS, FILES } from './paths.js';
 import {
   CRON_FILE_TEMPLATE,
   DEFAULT_MEMORY_PROMPT,
@@ -10,7 +10,7 @@ import {
   DEFAULT_TOOL_PROMPT,
   MEMORY_FILE_TEMPLATE,
   USER_FILE_TEMPLATE,
-} from '../prompts/defaults';
+} from '../prompts/defaults.js';
 
 /**
  * 启动时的**文件**初始化。

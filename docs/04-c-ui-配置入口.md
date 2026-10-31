@@ -12,20 +12,20 @@
 
 ## 4.1 配置落点总表
 
-| 配置项                   | 落地位置                          | 生效时机 | 备注                             |
-| ------------------------ | --------------------------------- | -------- | -------------------------------- |
-| AI 模型（Base URL + Key + 模型标识 + 思考预算） | `.env` 的 `LLM_*`        | 重启     | ⚠️ **纯标量**：没有 JSON、没有供应商前缀 |
-| 上下文文件（项目指令）   | `AGENTS.md`（项目根）             | **下一轮** | 对标 Hermes 的同名文件         |
-| 人格文件                 | `SOUL.md`（项目根）               | **下一轮** | 对标 Hermes 的人格文件         |
-| 提示词（system/tool/memory/summary） | `prompts/<name>.md` | **下一轮对话** | 版本与回滚靠 git       |
-| 通用配置（20 项 / 6 组 + 4 项新） | `.env`  | 重启     | 超出范围 → **启动即报错**        |
-| 内置工具元信息（描述/敏感档/启用） | `tools/builtin/*` + `tools/registry.ts` | 重启 | 描述改了模型选工具的行为就变 |
-| Skill                    | `data/skills/<name>/SKILL.md`     | 重启     | 手动拷目录；脚本默认 `high` 敏感档 |
-| MCP server               | `data/mcp.json`（文件）         | 重启   | `.env` 只留 `MCP_CONFIG_PATH` 路径；`toolPolicy` 默认 `ask` |
-| 长期记忆（Agent 侧）     | `data/memory/MEMORY.md`           | 即时     | 人可直接编辑；FTS5 索引自动重建   |
-| 长期记忆（用户侧）       | `data/memory/USER.md`             | 即时     | 同上；也可 `yarn memory:*` 增删改 |
-| 定时任务                 | `data/cron.json`                  | 重启     | 自然语言 schedule + 指令         |
-| 预算 / 成本闸            | `.env`          | 重启     | 超预算由后端拦截并回话说明原因   |
+| 配置项                                          | 落地位置                                | 生效时机       | 备注                                                        |
+| ----------------------------------------------- | --------------------------------------- | -------------- | ----------------------------------------------------------- |
+| AI 模型（Base URL + Key + 模型标识 + 思考预算） | `.env` 的 `LLM_*`                       | 重启           | ⚠️ **纯标量**：没有 JSON、没有供应商前缀                    |
+| 上下文文件（项目指令）                          | `AGENTS.md`（项目根）                   | **下一轮**     | 对标 Hermes 的同名文件                                      |
+| 人格文件                                        | `SOUL.md`（项目根）                     | **下一轮**     | 对标 Hermes 的人格文件                                      |
+| 提示词（system/tool/memory/summary）            | `prompts/<name>.md`                     | **下一轮对话** | 版本与回滚靠 git                                            |
+| 通用配置（20 项 / 6 组 + 4 项新）               | `.env`                                  | 重启           | 超出范围 → **启动即报错**                                   |
+| 内置工具元信息（描述/敏感档/启用）              | `tools/builtin/*` + `tools/registry.ts` | 重启           | 描述改了模型选工具的行为就变                                |
+| Skill                                           | `data/skills/<name>/SKILL.md`           | 重启           | 手动拷目录；脚本默认 `high` 敏感档                          |
+| MCP server                                      | `data/mcp.json`（文件）                 | 重启           | `.env` 只留 `MCP_CONFIG_PATH` 路径；`toolPolicy` 默认 `ask` |
+| 长期记忆（Agent 侧）                            | `data/memory/MEMORY.md`                 | 即时           | 人可直接编辑；FTS5 索引自动重建                             |
+| 长期记忆（用户侧）                              | `data/memory/USER.md`                   | 即时           | 同上；也可 `yarn memory:*` 增删改                           |
+| 定时任务                                        | `data/cron.json`                        | 重启           | 自然语言 schedule + 指令                                    |
+| 预算 / 成本闸                                   | `.env`                                  | 重启           | 超预算由后端拦截并回话说明原因                              |
 
 > ⚠️ **表里的相对路径一律相对「项目根」**（不是当前工作目录）——
 > 基准规则见 [02 §路径基准](./02-系统架构与目录.md)。
@@ -61,10 +61,10 @@ LLM_MODEL=glm-5.3
 
 | 供应商    | `LLM_BASE_URL`                                  | `LLM_MODEL`       |
 | --------- | ----------------------------------------------- | ----------------- |
-| 智谱 GLM  | `https://open.bigmodel.cn/api/anthropic`         | `glm-5.3`         |
-| MiniMax   | `https://api.minimaxi.com/anthropic`             | `MiniMax-M3`      |
-| DeepSeek  | `https://api.deepseek.com/anthropic`             | `deepseek-v4-pro` |
-| 千问 Qwen  | `https://dashscope.aliyuncs.com/apps/anthropic`  | `qwen3.8-max`    |
+| 智谱 GLM  | `https://open.bigmodel.cn/api/anthropic`        | `glm-5.3`         |
+| MiniMax   | `https://api.minimaxi.com/anthropic`            | `MiniMax-M3`      |
+| DeepSeek  | `https://api.deepseek.com/anthropic`            | `deepseek-v4-pro` |
+| 千问 Qwen | `https://dashscope.aliyuncs.com/apps/anthropic` | `qwen3.8-max`     |
 
 ⚠️ MiniMax 直连不稳定（DNS 解析到保留段），需要走代理。
 
@@ -84,14 +84,14 @@ LLM_MODEL=glm-5.3
 
 ## 4.3 上下文文件与提示词
 
-| 文件                      | 作用                 | 生效时机   |
-| ------------------------- | -------------------- | ---------- |
-| `AGENTS.md`（项目根）     | 项目级指令           | **下一轮** |
-| `SOUL.md`（项目根）       | 人格 / 语气 / 风格   | **下一轮** |
-| `prompts/system.md`  | 系统提示词           | **下一轮** |
-| `prompts/tool.md`    | 工具使用规范         | **下一轮** |
-| `prompts/memory.md`  | 记忆抽取 / 召回指令  | **下一轮** |
-| `prompts/summary.md` | 摘要指令             | **下一轮** |
+| 文件                  | 作用                | 生效时机   |
+| --------------------- | ------------------- | ---------- |
+| `AGENTS.md`（项目根） | 项目级指令          | **下一轮** |
+| `SOUL.md`（项目根）   | 人格 / 语气 / 风格  | **下一轮** |
+| `prompts/system.md`   | 系统提示词          | **下一轮** |
+| `prompts/tool.md`     | 工具使用规范        | **下一轮** |
+| `prompts/memory.md`   | 记忆抽取 / 召回指令 | **下一轮** |
+| `prompts/summary.md`  | 摘要指令            | **下一轮** |
 
 - 提示词文件名 ∈ `system` / `tool` / `memory` / `summary`
 - ⚠️ **没有版本表、没有发布指针** —— 文件当前内容就是生效内容，
@@ -122,14 +122,14 @@ LLM_MODEL=glm-5.3
 
 六个分组、共 20 项：
 
-| 分组     | 配置项                                                                              |
-| -------- | ----------------------------------------------------------------------------------- |
-| 通用     | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT` |
-| 模型     | `DEFAULT_TEMPERATURE` · `DEFAULT_MAX_TOKENS` · `THINKING_BUDGET` · `MULTI_TOOL_CALLS`    |
-| 记忆     | `MEMORY_ENABLED` · `MEMORY_RELEVANCE_ENABLED` · `MEMORY_TOP_K` · `MEMORY_TOKEN_BUDGET` · `SUMMARY_ENABLED` · `SUMMARY_TOKEN_BUDGET` |
-| 成本     | `MONTHLY_TOKEN_BUDGET` · `COST_BUDGET_BLOCK` · `WARN_RATIO`                            |
-| 安全     | `ALLOW_PRIVATE_EGRESS` · `SHELL_ENABLED` · `TOOL_CONFIRM_LEVEL`                        |
-| 工具     | `TOOL_OUTPUT_MAX_CHARS` · `TOOL_OUTPUT_TRUNCATE`                                       |
+| 分组 | 配置项                                                                                                                              |
+| ---- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| 通用 | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT`                                            |
+| 模型 | `DEFAULT_TEMPERATURE` · `DEFAULT_MAX_TOKENS` · `THINKING_BUDGET` · `MULTI_TOOL_CALLS`                                               |
+| 记忆 | `MEMORY_ENABLED` · `MEMORY_RELEVANCE_ENABLED` · `MEMORY_TOP_K` · `MEMORY_TOKEN_BUDGET` · `SUMMARY_ENABLED` · `SUMMARY_TOKEN_BUDGET` |
+| 成本 | `MONTHLY_TOKEN_BUDGET` · `COST_BUDGET_BLOCK` · `WARN_RATIO`                                                                         |
+| 安全 | `ALLOW_PRIVATE_EGRESS` · `SHELL_ENABLED` · `TOOL_CONFIRM_LEVEL`                                                                     |
+| 工具 | `TOOL_OUTPUT_MAX_CHARS` · `TOOL_OUTPUT_TRUNCATE`                                                                                    |
 
 校验规则与提示文案：
 
@@ -170,12 +170,12 @@ LLM_MODEL=glm-5.3
   "servers": [
     {
       "name": "example",
-      "transport": "stdio",              // stdio | sse | http
+      "transport": "stdio", // stdio | sse | http
       "command": "npx",
       "args": ["-y", "@example/mcp"],
       "env": {},
       "enabled": true,
-      "toolPolicy": "ask"                // ask（默认）| auto | off
+      "toolPolicy": "ask" // ask（默认）| auto | off
     }
   ]
 }
@@ -191,20 +191,20 @@ LLM_MODEL=glm-5.3
 
 > 配置、记忆、流水、成本、历史、评测、定时任务 —— **都在命令行里做**。
 
-| 命令                                          | 作用                             |
-| --------------------------------------------- | -------------------------------- |
-| `yarn memory:list`                            | 列出记忆                       |
-| `yarn memory:add --content "<>"`              | 手动新增                       |
-| `yarn memory:edit <id>`                       | 编辑记忆                       |
-| `yarn memory:archive <id>`                    | 归档（软删）                   |
-| `yarn memory:delete <id>`                     | 永久删除                       |
-| `yarn memory:clear`                           | 永久清空全部                   |
-| `yarn tool:logs [--tool <n>] [--status <s>]`  | 查工具调用流水                 |
-| `yarn search:<关键词>`                         | 跨会话 + 记忆全文检索          |
-| `yarn cron:list`                              | 列出定时任务与上次执行时间      |
-| `yarn cron:add --prompt "<>" --schedule "<>"` | 新增定时任务                    |
-| `yarn cron:remove <name>`                     | 删除定时任务                    |
-| `yarn skill:list`                             | 列出已装技能                    |
+| 命令                                          | 作用                       |
+| --------------------------------------------- | -------------------------- |
+| `yarn memory:list`                            | 列出记忆                   |
+| `yarn memory:add --content "<>"`              | 手动新增                   |
+| `yarn memory:edit <id>`                       | 编辑记忆                   |
+| `yarn memory:archive <id>`                    | 归档（软删）               |
+| `yarn memory:delete <id>`                     | 永久删除                   |
+| `yarn memory:clear`                           | 永久清空全部               |
+| `yarn tool:logs [--tool <n>] [--status <s>]`  | 查工具调用流水             |
+| `yarn search:<关键词>`                        | 跨会话 + 记忆全文检索      |
+| `yarn cron:list`                              | 列出定时任务与上次执行时间 |
+| `yarn cron:add --prompt "<>" --schedule "<>"` | 新增定时任务               |
+| `yarn cron:remove <name>`                     | 删除定时任务               |
+| `yarn skill:list`                             | 列出已装技能               |
 
 ---
 

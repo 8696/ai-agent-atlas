@@ -3,7 +3,10 @@
     "target": "ES2023",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2023"],
+    // ⚠️ **DOM 是给 e2e 测试用的**（Playwright 页面类型）——
+    //    合并成一个 project 之后，后端也会看到 DOM 全局量。
+    //    只多了浏览器 API 的类型，**不会让既有代码报错**（实测 tsc 0 error）。
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "strict": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
@@ -16,5 +19,16 @@
     "rootDir": ".",
     "types": ["node"]
   },
-  "include": ["src/**/*", "shared/**/*", "scripts/**/*"]
+  // ⚠️ **这里是「后端 + 测试 + 根级构建配置」的一个 project** ——
+  //    ESLint 的 projectService 按「最近的同名 tsconfig.json」找 project，
+  //    合并成一个能少建一个 TS Program（每个 Program 都要重新解析 lib 文件，很贵）。
+  "include": [
+    "src/**/*",
+    "shared/**/*",
+    "scripts/**/*",
+    "tests/**/*",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }

@@ -146,7 +146,11 @@ export function MessageList({ messages, status, onRegenerate, onPickSuggestion }
               ) : null}
               {streaming && !text ? <Spin size="small" /> : null}
               {!streaming && message.id === lastAssistantId ? (
-                <button type="button" className="atlas-redo" onClick={() => onRegenerate(message.id)}>
+                <button
+                  type="button"
+                  className="atlas-redo"
+                  onClick={() => onRegenerate(message.id)}
+                >
                   重新生成
                 </button>
               ) : null}

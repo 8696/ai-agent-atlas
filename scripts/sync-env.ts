@@ -19,8 +19,8 @@
  * 见 [AGENTS.md §4.3](../AGENTS.md)。
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { ENV_KEYS } from '../src/config/schema';
-import { FILES } from '../src/config/paths';
+import { ENV_KEYS } from '../src/config/schema.js';
+import { FILES } from '../src/config/paths.js';
 
 const ENV_PATH = FILES.env;
 const EXAMPLE_PATH = FILES.envExample;
@@ -70,7 +70,12 @@ function render(parsed: ParsedEnv, keys: string[]): string {
     const block = parsed.blocks.get(key);
     if (block) out.push(...block);
   }
-  return out.join('\n').replace(/\n{3,}/g, '\n\n').replace(/\s+$/, '') + '\n';
+  return (
+    out
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .replace(/\s+$/, '') + '\n'
+  );
 }
 
 /**
@@ -109,9 +114,7 @@ function main(): void {
     for (const v of vendorVars) {
       const inOther = label === '.env' ? example : env;
       if (!inOther.order.includes(v)) {
-        problems.push(
-          `供应商变量只在 ${label} 里有：${v} —— 两个文件应保持同一组 key（值可不同）`,
-        );
+        problems.push(`供应商变量只在 ${label} 里有：${v} —— 两个文件应保持同一组 key（值可不同）`);
       }
     }
   }
@@ -121,9 +124,7 @@ function main(): void {
     (k) => !env.order.includes(k) && !example.order.includes(k),
   );
   if (missingEverywhere.length > 0) {
-    problems.push(
-      `漏配 —— envSchema 里有、两个文件都没有：${missingEverywhere.join(' · ')}`,
-    );
+    problems.push(`漏配 —— envSchema 里有、两个文件都没有：${missingEverywhere.join(' · ')}`);
   }
 
   // ── 漏配（可修）：schema 有、只有一个文件没有 ──
@@ -146,8 +147,7 @@ function main(): void {
   }
 
   if (missingInEnv.length > 0) fixable.push(`.env 缺 ${missingInEnv.join(' · ')}`);
-  if (missingInExample.length > 0)
-    fixable.push(`.env.example 缺 ${missingInExample.join(' · ')}`);
+  if (missingInExample.length > 0) fixable.push(`.env.example 缺 ${missingInExample.join(' · ')}`);
   if (orderMismatch) fixable.push('key 顺序与 envSchema 不一致');
 
   if (CHECK_ONLY) {
@@ -160,7 +160,7 @@ function main(): void {
       console.error('[env] 校验未通过。\n');
       process.exit(1);
     }
-    console.log('[env] ✅ `.env` / `.env.example` / envSchema 三方一致\n');
+    console.info('[env] ✅ `.env` / `.env.example` / envSchema 三方一致\n');
     return;
   }
 
@@ -214,9 +214,9 @@ function main(): void {
   if (changed) {
     writeFileSync(ENV_PATH, render(env, env.order), 'utf8');
     writeFileSync(EXAMPLE_PATH, render(example, example.order), 'utf8');
-    console.log('[env] 已同步：补 key + 按 envSchema 顺序重排');
+    console.info('[env] 已同步：补 key + 按 envSchema 顺序重排');
   } else {
-    console.log('[env] 无需修改');
+    console.info('[env] 无需修改');
   }
 
   if (problems.length > 0) {

@@ -44,7 +44,7 @@
 
 已就位的部分：
 
-- 工程骨架：`package.json` · 双 tsconfig · Vite · Vitest · Playwright · ESLint / Prettier
+- 工程骨架：`package.json` · 多份 tsconfig · Vite · Vitest · Playwright · ESLint / Prettier
 - 后端最小可启动：`src/server.ts`（Koa + `/api/v1/health`）· `src/config.ts`（envSchema 契约）·
   `src/db.ts`（SQLite + WAL）· `scripts/migrate.ts`（umzug）
 - **对话竖切（已跑通）**：
@@ -157,12 +157,18 @@
   | 改了 UI 交互               | `yarn test:e2e`（只跑相关的主路径）     | 分钟  |
 
   ⚠️ **不要默认跑全量** —— 全量是「交付前」的动作，不是「改完」的动作
-  ⚠️ **`yarn run check` = `yarn typecheck`** —— `yarn lint` 当前因
-  typescript-eslint 不支持 TS 7 而**跑不起来**（见 [03-a §A.4](./docs/03-a-技术栈-工程化规范.md)），
-  **别把跑不起来的命令放进默认验证闸**
+  ⚠️ **`yarn run check` = typecheck 与 lint 并行**（`concurrently`）——
+  实测 ~5s。lint 曾因 typescript-eslint 不支持 TS 7 而**跑不起来**，已修好
+  （TS 6 API + TS 7 编译器并存，见 [03-a §A.4](./docs/03-a-技术栈-工程化规范.md)）
+  ⚠️ **lint 是类型感知的** —— `recommendedTypeChecked` 全套开着，
+  会查「async 函数没 await」「React 事件属性传了 async 函数」这类**语法层查不出来**的问题。
+  ⚠️ **新增目录要给它配一份同名 `tsconfig.json`** —— ESLint 的 projectService
+  只认这个名字，否则该目录下的文件拿不到类型信息（见 [03-a §A.3](./docs/03-a-技术栈-工程化规范.md)）
+  ⚠️ **相对导入一律带 `.js` 后缀** —— 源码是原生 ESM，Node 不做扩展名补全；
+  不带 `.js` 的话 `tsx` 能跑但 `yarn start` 的产物起不来（见 [03-a §A.3.1](./docs/03-a-技术栈-工程化规范.md)）
   ⚠️ **必须写 `yarn run check`，不能写 `yarn check`** —— yarn 1 自带一个
   同名的 `check` 内置命令（依赖树完整性检查），会**盖过 package.json 里的脚本**，
-  跑出来是一堆 typescript-eslint/TS 7 的依赖报错，跟类型检查没关系
+  跑出来是一堆依赖树报错，跟类型检查没关系
   ⚠️ **不要加 `--reporter=verbose`** —— 配置里已用 `agent` reporter，
   **成功的用例一行都不打**；几百行 stdout 塞满 context 之后每一轮都变慢
   ⚠️ **改前端 .tsx 不动 API → 只跑 `yarn run check`**

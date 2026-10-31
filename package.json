@@ -13,10 +13,10 @@
     "dev:backend": "yarn migrate && tsx watch src/server.ts",
     "dev:frontend": "vite",
     "build": "yarn build:backend && yarn build:frontend",
-    "build:backend": "tsc",
+    "build:backend": "tsc -p tsconfig.build.json",
     "build:frontend": "vite build",
     "preview": "vite preview",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "migrate": "tsx scripts/migrate.ts",
     "migrate:undo": "tsx scripts/migrate.ts --undo",
     "backup": "tsx scripts/backup.ts",
@@ -32,10 +32,10 @@
     "test:all": "yarn check && yarn test && yarn test:e2e",
     "lint": "eslint . --max-warnings 0",
     "lint:fix": "eslint . --fix",
-    "format": "prettier --write \"src/**/*.ts\" \"web/**/*.{ts,tsx}\" \"shared/**/*.ts\" \"docs/**/*.md\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"web/**/*.{ts,tsx}\" \"shared/**/*.ts\"",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.e2e.json",
-    "check": "yarn typecheck"
+    "format": "prettier --write --no-error-on-unmatched-pattern \"src/**/*.ts\" \"web/**/*.{ts,tsx}\" \"shared/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" \"*.ts\" \"*.js\" \"*.json\" \"docs/**/*.md\"",
+    "format:check": "prettier --check --no-error-on-unmatched-pattern \"src/**/*.ts\" \"web/**/*.{ts,tsx}\" \"shared/**/*.ts\" \"scripts/**/*.ts\" \"tests/**/*.ts\" \"*.ts\" \"*.js\" \"*.json\" \"docs/**/*.md\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p web/tsconfig.json",
+    "check": "concurrently -n tsc,lint -r \"yarn typecheck\" \"yarn lint\""
   },
   "dependencies": {
     "@ai-sdk/react": "^4.0.161",
@@ -91,7 +91,8 @@
     "globals": "^17.13.0",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
-    "typescript": "^7.0.2",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "typescript7": "npm:typescript@^7.0.2",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"

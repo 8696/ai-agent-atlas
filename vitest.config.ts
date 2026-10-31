@@ -32,7 +32,9 @@ export default defineConfig({
           // ⚠️ 超时收到 5 秒：挂死的用例立刻失败，不占着 30 秒空等
           testTimeout: 5_000,
           hookTimeout: 5_000,
-          reporters: ['agent'],
+          // ⚠️ **不在这儿设 `reporters`** —— vitest 5 的 `reporters` 是**顶层专用**
+          //    （属于 `NonProjectOptions`），写在 project 的 `test:` 里是无效配置。
+          //    顶层那份 `reporters: ['agent']` 对所有 project 生效。
           // 纯函数无状态 → 不需要为每个用例重建模块上下文（省一半时间）
           pool: 'threads',
           isolate: false,
@@ -46,7 +48,7 @@ export default defineConfig({
           environment: 'node',
           testTimeout: 15_000,
           hookTimeout: 15_000,
-          reporters: ['agent'],
+          // ⚠️ 同上 —— `reporters` 是顶层专用，不能写在 project 里
           // 用 forks 而不是 threads：集成测试会开真 SQLite 文件句柄与定时器，
           // 进程隔离更稳（threads 下偶发的句柄冲突是 flaky 的常见来源）
           pool: 'forks',

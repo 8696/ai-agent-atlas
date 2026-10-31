@@ -1,13 +1,7 @@
 import { config as loadDotenv } from 'dotenv';
-import { envSchema, validateRelations, type Env } from './config/schema';
-import {
-  DIRS,
-  FILES,
-  PROJECT_ROOT,
-  ensureDirs,
-  resolvePath,
-} from './config/paths';
-import { ensureFiles } from './config/ensure';
+import { envSchema, validateRelations, type Env } from './config/schema.js';
+import { DIRS, FILES, PROJECT_ROOT, ensureDirs, resolvePath } from './config/paths.js';
+import { ensureFiles } from './config/ensure.js';
 
 /**
  * 运行时配置 —— 启动时加载 + 校验，失败直接退出。
@@ -50,7 +44,7 @@ export const config: Env = loadEnv();
  *
  * ⚠️ **代码里一律用这里的路径，不要自己拼相对路径**：
  * ```ts
- * import { paths } from './config';
+ * import { paths } from './config.js';
  * fs.readFileSync(join(paths.prompts, 'system.md'), 'utf8');
  * ```
  * 相对路径只在**文档与 `.env` 里**出现（那是给人看的），
@@ -73,11 +67,11 @@ ensureDirs();
 // ⚠️ 出厂文件 / 运行时文件不存在就补 —— 缺了也能直接跑
 const { created } = ensureFiles();
 if (created.length > 0) {
-  console.log(
+  console.info(
     `[Atlas] 已初始化 ${created.length} 个文件：\n` +
       created.map((p) => `  · ${p.replace(`${PROJECT_ROOT}/`, '')}`).join('\n'),
   );
 }
 
-export type { Env } from './config/schema';
-export { PROJECT_ROOT, resolvePath } from './config/paths';
+export type { Env } from './config/schema.js';
+export { PROJECT_ROOT, resolvePath } from './config/paths.js';

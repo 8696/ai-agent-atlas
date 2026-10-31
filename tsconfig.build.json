@@ -1,0 +1,11 @@
+{
+  // ⚠️ **构建用的配置** —— 只编译要发出去的东西。
+  //    根 `tsconfig.json` 里还有测试和根级 config（供类型检查 / ESLint 用），
+  //    那些不该进 `dist/`，所以单独一份。
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // 后端本来就没有 DOM —— 构建时还原成后端那套 lib
+    "lib": ["ES2023"]
+  },
+  "include": ["src/**/*", "shared/**/*", "scripts/**/*"]
+}

@@ -44,11 +44,14 @@ export function ErrorPage({ status }: Props) {
     <Result
       status={code === 404 ? '404' : code === 403 ? '403' : '500'}
       title={title}
-      subTitle={
-        <Typography.Text type="secondary">{detail}</Typography.Text>
-      }
+      subTitle={<Typography.Text type="secondary">{detail}</Typography.Text>}
       extra={
-        <Button type="primary" onClick={() => navigate('/chat')}>
+        <Button
+          type="primary"
+          onClick={() => {
+            void navigate('/chat');
+          }}
+        >
           回到聊天
         </Button>
       }

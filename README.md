@@ -98,7 +98,9 @@ yarn start
 | 命令                | 作用                                       |
 | ------------------- | ------------------------------------------ |
 | `yarn dev`          | 前后端一起起（后端带热重载）                |
-| `yarn typecheck`    | 三份 tsconfig 全量类型检查                 |
+| `yarn run check`    | **默认验证闸**：typecheck + lint             |
+| `yarn typecheck`    | 两份 tsconfig 全量类型检查                 |
+| `yarn lint`         | ESLint（类型感知，0 warning 才算过）        |
 | `yarn test`         | unit + integration                          |
 | `yarn test:e2e`     | Playwright（首次要先 `npx playwright install chromium`） |
 | `yarn migrate`      | 跑 pending 迁移                             |

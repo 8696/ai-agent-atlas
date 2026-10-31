@@ -1,6 +1,6 @@
 import { ChatAnthropic } from '@langchain/anthropic';
-import { config } from '../config';
-import type { Env } from '../config/schema';
+import { config } from '../config.js';
+import type { Env } from '../config/schema.js';
 
 /**
  * 模型解析 —— **全项目唯一一处**拿模型的地方。
@@ -83,9 +83,7 @@ export function resolveThinkingBudget(model: ResolvedModel): number {
  */
 export function createChatModel(model: ResolvedModel): ChatAnthropic {
   if (!model.apiKey) {
-    throw new Error(
-      `模型「${model.name}」缺少 API Key —— 检查 .env 里的 LLM_API_KEY`,
-    );
+    throw new Error(`模型「${model.name}」缺少 API Key —— 检查 .env 里的 LLM_API_KEY`);
   }
   const budget = resolveThinkingBudget(model);
   const thinkingOn = budget > 0;

@@ -1,8 +1,8 @@
 import type { UIMessageChunk } from 'ai';
-import type { ChatEvent } from '../services/chat';
+import type { ChatEvent } from '../services/chat.js';
 
 export type { ChatEvent };
-import { sanitizeMessage } from '../lib/errors';
+import { sanitizeMessage } from '../lib/errors.js';
 
 /**
  * **协议翻译层** —— 领域事件 → AI SDK UI Message Stream 的 part 序列。
@@ -63,7 +63,8 @@ export async function* createChatEventStream(
       if (event.type === 'reasoning-delta') {
         if (!reasoningOpen) {
           reasoningCount += 1;
-          reasoningId = reasoningCount === 1 ? REASONING_PART_ID : `${REASONING_PART_ID}-${reasoningCount}`;
+          reasoningId =
+            reasoningCount === 1 ? REASONING_PART_ID : `${REASONING_PART_ID}-${reasoningCount}`;
           yield { type: 'reasoning-start', id: reasoningId };
           reasoningOpen = true;
         }
@@ -88,6 +89,7 @@ export async function* createChatEventStream(
 
 /** 错误 → 一句人能看懂的话（**不许带密钥**） */
 export function describeError(error: unknown): string {
-  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '未知错误';
+  const raw =
+    error instanceof Error ? error.message : typeof error === 'string' ? error : '未知错误';
   return sanitizeMessage(raw);
 }

@@ -10,6 +10,12 @@ import { renderTemplate } from '../../src/services/prompt';
  * 覆盖：消息形状转换 · 提示词占位符 · 错误打码 · 协议翻译。
  */
 
+/* eslint-disable @typescript-eslint/require-await --
+ * 下面的事件流 fixture 是 **async generator** —— `async` 是签名
+ * （`AsyncGenerator<ChatEvent>`）要求的，不是误用；它们只 yield、没有 await。
+ * `require-await` 只在 `yield await x` 时才放行 async generator，这里会误报。
+ */
+
 async function collect<T>(gen: AsyncGenerator<T>): Promise<T[]> {
   const out: T[] = [];
   for await (const item of gen) out.push(item);
@@ -87,7 +93,12 @@ describe('协议翻译（领域事件 → UI Message Stream）', () => {
       // 空流
     }
     const chunks = await collect(createChatEventStream({ events: events() }));
-    expect(chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step', 'finish-step', 'finish']);
+    expect(chunks.map((chunk) => chunk.type)).toEqual([
+      'start',
+      'start-step',
+      'finish-step',
+      'finish',
+    ]);
   });
 
   it('思考在正文前面，两段各自开合', async () => {

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { DIRS, FILES } from '../config/paths';
+import { DIRS, FILES } from '../config/paths.js';
 
 /**
  * 提示词与上下文文件 —— **每轮读文件，不缓存**（见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
@@ -18,10 +18,7 @@ export const KNOWN_PLACEHOLDERS = ['date', 'tools', 'skills', 'memories'] as con
  *
  * ⚠️ **未识别的占位符原样保留**（`{{foo}}` → `{{foo}}`）。
  */
-export function renderTemplate(
-  template: string,
-  vars: Record<string, string>,
-): string {
+export function renderTemplate(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{([A-Za-z0-9_]+)\}\}/g, (match, key: string) =>
     Object.prototype.hasOwnProperty.call(vars, key) ? (vars[key] ?? '') : match,
   );
