@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { config } from '../../config.js';
 import { paths } from '../../config.js';
 import { matchBlacklist } from '../../lib/security/blacklist.js';
+import { toolEnv } from '../../lib/security/env.js';
+import { resolveInWorkspace } from '../../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
 import type { ToolDefinition, ToolResult } from '../types.js';
@@ -45,17 +47,26 @@ export const shellTool: ToolDefinition = {
     const command = input.command;
 
     // ⚠️ **黑名单直接拒** —— 不给确认的机会
+    // 📌 **策略层已经先拦了一道**（`lib/security/policy.ts` 的 `decideTool`），
+    //    这里是**兜底** —— 别的入口（定时任务 / 沙箱 RPC）也走这条。
     const hit = matchBlacklist(command);
     if (hit) {
       const message = `命令命中安全黑名单（${hit.name}：${hit.reason}），已拒绝执行`;
       return { ok: false, output: message, error: `COMMAND_BLOCKED: ${message}` };
     }
 
-    const cwd = input.cwd
-      ? input.cwd.startsWith('/')
-        ? input.cwd
-        : `${paths.workspaceRoot}/${input.cwd}`
-      : paths.workspaceRoot;
+    // ⚠️ **工作目录必须在工作区内** —— 模型可以传绝对路径或 `../..`
+    //    （见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md) 的通用约束）
+    let cwd: string;
+    try {
+      cwd = input.cwd
+        ? resolveInWorkspace(input.cwd, paths.workspaceRoot, { allowRoot: true })
+        : paths.workspaceRoot;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { ok: false, output: message, error: 'CWD_OUTSIDE_WORKSPACE' };
+    }
+
     const timeoutMs = input.timeoutMs ?? config.TOOL_TIMEOUT_MS;
     const isWindows = platform() === 'win32';
 
@@ -69,7 +80,9 @@ export const shellTool: ToolDefinition = {
     }>((resolve) => {
       const child = spawn(isWindows ? 'cmd' : '/bin/sh', isWindows ? ['/c', command] : ['-c', command], {
         cwd,
-        env: { ...process.env, ATLAS_SHELL: '1' },
+        // ⚠️ **环境变量走白名单** —— 不继承 `process.env`，
+        //    否则 `printenv LLM_API_KEY` 就能把密钥读出来
+        env: toolEnv({ ATLAS_SHELL: '1' }),
         // ⚠️ **不给 stdin** —— 命令别等输入
         stdio: ['ignore', 'pipe', 'pipe'],
       });

@@ -21,7 +21,81 @@ const SECRET_VALUE_PATTERNS: RegExp[] = [
   /((?:api[_-]?key|authorization|access[_-]?token|refresh[_-]?token)\s*[:=]\s*)["']?[^\s"',}]{6,}["']?/gi,
   /\bgh[pousr]_[A-Za-z0-9]{16,}\b/g,
   /\bAKIA[0-9A-Z]{12,}\b/g,
+  // 📌 **`id.secret` 形态** —— 智谱这类平台的 key 没有 `sk-` 前缀
+  //    （实测本项目在用的是 `32位hex.16位base62`）
+  //    ⚠️ **第一段必须是十六进制** —— 免得误伤 JWT（`xxx.yyy.zzz`）
+  /\b[0-9a-fA-F]{24,}\.[A-Za-z0-9]{16,}\b/g,
 ];
+
+/**
+ * 配置里的密钥字段（**登记精确值用**）。
+ *
+ * ⚠️ **跟 `SECRET_KEY_PATTERN` 不是一回事** —— 那个是「字段名像密钥」，
+ *    拿来决定「整个值要不要打码」；这个只认**真的装密钥的字段**。
+ *    （`MONTHLY_TOKEN_BUDGET` 里也有 token，但它不是密钥。）
+ */
+const CONFIG_SECRET_PATTERN =
+  /(^|_)(API_KEY|ACCESS_KEY|SECRET_KEY|PRIVATE_KEY|TOKEN|SECRET|PASSWORD|PASSWD)$/i;
+
+/**
+ * 已知密钥的**精确值**（**长度 ≥ 8 才算** —— 太短的值容易误伤正文）。
+ *
+ * ⚠️ **正则只是常见形态的兜底** —— 供应商的 key 形态千奇百怪，
+ *    正则认不出的就靠这张表（**启动时按配置里的真值登记**）。
+ */
+const knownSecrets = new Set<string>();
+
+/**
+ * 注册一个确切的密钥值 —— 打码时按**精确值**替换。
+ *
+ * 📌 **为什么不能只靠正则** —— 本项目在用的智谱 key 是
+ *    `32位hex.16位base62`，`sk-` / `Bearer` / `AKIA` 一条都不匹配。
+ * 正则只是**常见形态的兜底**，**精确值才是可靠的**。
+ */
+export function registerSecret(value: string | undefined | null): void {
+  if (typeof value !== 'string') return;
+  const trimmed = value.trim();
+  if (trimmed.length < 8) return;
+  knownSecrets.add(trimmed);
+}
+
+/**
+ * 重新扫一遍 `process.env`（**测试用**）。
+ *
+ * ⚠️ **正常代码不该调它** —— 扫描是一次性的（懒加载）。
+ */
+export function resetSecretScan(): void {
+  envScanned = false;
+}
+
+/** 这个配置项是不是「装着密钥的那种」（**给启动时登记用**） */
+export function isConfigSecretField(name: string): boolean {
+  return CONFIG_SECRET_PATTERN.test(name);
+}
+
+/** 已登记的密钥值（**测试用**） */
+export function registeredSecrets(): string[] {
+  return [...knownSecrets];
+}
+
+/** `process.env` 扫过了没 */
+let envScanned = false;
+
+/**
+ * **懒加载**地把 `process.env` 里的密钥字段捞出来登记。
+ *
+ * ⚠️ **为什么要懒加载** —— `registerSecret()` 在 `config.ts` 加载时调用，
+ *    但 `mask.ts` 本身**不依赖 config**（脚本与单测都能单独 import 它）。
+ *    哪条路径先打码、config 有没有被加载过，**不该影响脱敏是否生效** ——
+ *    这道防线不能有「取决于加载顺序」的漏洞。
+ */
+function ensureEnvSecrets(): void {
+  if (envScanned) return;
+  envScanned = true;
+  for (const [key, value] of Object.entries(process.env)) {
+    if (isConfigSecretField(key)) registerSecret(value);
+  }
+}
 
 /** 打码后的占位符 */
 export const MASK = '***';
@@ -33,7 +107,12 @@ export function isSecretField(name: string): boolean {
 
 /** 打码一个字符串里的疑似密钥 */
 export function maskString(value: string): string {
+  ensureEnvSecrets();
   let out = sanitizeMessage(value);
+  // 📌 **先按精确值替换** —— 正则认不出的形态（智谱的 `id.secret`）靠这一步
+  for (const secret of knownSecrets) {
+    if (out.includes(secret)) out = out.split(secret).join(MASK);
+  }
   for (const pattern of SECRET_VALUE_PATTERNS) {
     out = out.replace(pattern, (match, prefix?: string) => (prefix ? `${prefix}${MASK}` : MASK));
   }
@@ -51,6 +130,11 @@ export function maskString(value: string): string {
  */
 export function looksLikeSecret(value: string): boolean {
   if (typeof value !== 'string' || value === '') return false;
+  ensureEnvSecrets();
+  // 📌 **已登记的精确值也算** —— 供应商的形态再怪，登记过就认得
+  for (const secret of knownSecrets) {
+    if (value.includes(secret)) return true;
+  }
   return SECRET_VALUE_PATTERNS.some((pattern) => {
     const probe = new RegExp(pattern.source, pattern.flags.replace('g', ''));
     return probe.test(value);

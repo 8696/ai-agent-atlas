@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { matchBlacklist } from '../lib/security/blacklist.js';
+import { toolEnv } from '../lib/security/env.js';
 import { isInside, realpathAllowMissing } from '../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../tools/args.js';
 import { truncateOutput } from '../tools/output.js';
@@ -20,10 +21,11 @@ import type { Skill } from './types.js';
  * | --------------- | -------------------------------------- | ------ |
  * | `skill_create`  | 新建一个技能（说明 + 可选脚本）       | normal |
  * | `skill_update`  | 改写已有技能的正文                     | normal |
- * | `skill_<名字>`  | 执行某个技能自带的脚本（**每个技能一个**） | 按技能声明 |
+ * | `skill_<名字>`  | 执行某个技能自带的脚本（**每个技能一个**） | **一律 high** |
  *
  * ⚠️ **全部走统一入口与权限闸** —— 技能脚本能执行任意代码，
- * 所以**默认 `high` 档**（要人确认），**不能绕过确认**（见 [12-c C3](./../docs/12-c-需求-工具技能与扩展.md)）。
+ * 所以**一律 `high` 档**（要人确认），**不能绕过确认**（见 [12-c C3](./../docs/12-c-需求-工具技能与扩展.md)）。
+ * ⚠️ **frontmatter 声明的 `sensitivity` 不能把脚本往下压** —— 脚本就是执行代码。
  */
 
 /** `skill_create` 的入参 */
@@ -254,7 +256,9 @@ export async function runSkillScript(
   const outcome = await new Promise<ScriptOutcome>((resolvePromise) => {
     const child = spawn(command, argv, {
       cwd: skillRoot,
-      env: { ...process.env, ATLAS_SKILL: '1' },
+      // ⚠️ **环境变量走白名单** —— 不继承 `process.env`，
+      //    否则脚本里一句 `printenv LLM_API_KEY` 就能把密钥读出来
+      env: toolEnv({ ATLAS_SKILL: '1' }),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -348,7 +352,10 @@ export function skillScriptTool(skill: Skill): ToolDefinition | null {
     name: `skill_${skill.meta.name}`,
     description,
     schema: skillScriptSchema,
-    sensitivity: skill.meta.sensitivity,
+    // ⚠️ **脚本工具一律 `high`** —— frontmatter 声明的档位**不能往下压**。
+    //    脚本 = 任意代码执行，跟它「打算做什么」无关；
+    //    真要无人值守，走定时任务的 `autoApprove` 白名单（那条路是显式授权的）。
+    sensitivity: 'high',
     riskNote: `会执行技能「${skill.meta.name}」里的脚本 —— 确认前先看清楚要跑的是哪个文件。`,
     source: 'skill',
     enabled: true,

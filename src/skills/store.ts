@@ -6,6 +6,7 @@ import { writeAudit } from '../lib/audit.js';
 import { ensureFtsTables, reindexSkills } from '../lib/fts.js';
 import { matchBlacklist } from '../lib/security/blacklist.js';
 import { scanInjection } from '../lib/security/injection.js';
+import { hasInvisibleChars } from '../lib/security/invisible.js';
 import { looksLikeSecret } from '../lib/security/mask.js';
 import { parseFrontmatter, renderFrontmatter } from './frontmatter.js';
 import {
@@ -226,8 +227,10 @@ export interface SkillScanResult {
  * 1. **提示词注入** —— 「忽略之前的指令」这类
  * 2. **危险命令** —— `rm -rf` / `curl | sh` 这类（复用 shell 的黑名单）
  * 3. **凭据外泄** —— 内容里出现 API Key
+ * 4. **不可见 Unicode** —— 零宽字符、双向控制符（能把文字「藏」起来）
  *
  * 📌 **命中就拒绝写入**（不是告警）—— 技能是**持久化**的注入通道。
+ *    技能正文每轮都进系统提示词，藏一句话就是藏一条指令。
  */
 export function scanSkillContent(text: string): SkillScanResult {
   const reasons: string[] = [];
@@ -244,6 +247,10 @@ export function scanSkillContent(text: string): SkillScanResult {
 
   if (looksLikeSecret(text)) {
     reasons.push('内容里像是有 API Key / 令牌');
+  }
+
+  if (hasInvisibleChars(text)) {
+    reasons.push('内容里有不可见字符（零宽或双向控制符）');
   }
 
   return { ok: reasons.length === 0, reasons };

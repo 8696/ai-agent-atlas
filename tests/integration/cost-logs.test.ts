@@ -155,4 +155,36 @@ describe('成本记账（[12-d D4](../docs/12-d-需求-记忆与配置.md)）', 
     expect(rows[0]?.prompt_tokens).toBe(10);
     expect(rows[0]?.completion_tokens).toBe(5);
   });
+
+  it('⚠️ `/usage` 看得到推理 token，也说清楚「没配单价」', async () => {
+    const sessionId = await createSession();
+    // 📌 **记一条带推理 token 的** —— 字段早就有了，但出口以前不打印
+    await recordUsage({
+      sessionId,
+      messageId: null,
+      scope: 'chat',
+      model: 'fake-model',
+      inputTokens: 100,
+      outputTokens: 40,
+      reasoningTokens: 25,
+    });
+
+    const { runCommand, parseCommand } = await import('../../src/services/command');
+    const parsed = parseCommand('/usage');
+    expect(parsed).not.toBeNull();
+    const result = await runCommand(parsed as NonNullable<typeof parsed>, { sessionId });
+
+    // 📌 **推理 token 单列一行**
+    expect(result.text).toContain('推理 token：25');
+    // 📌 **没配单价的模型要点名** —— 「费用 0」是「不知道多少钱」，不是「没花钱」
+    expect(result.text).toContain('没配单价');
+    expect(result.text).toContain('fake-model');
+  });
+
+  it('⚠️ 汇总里能点名「哪些模型没配单价」', async () => {
+    const month = await monthlyUsage();
+    // 📌 **单价表是空的** —— 本月用过的模型全都没配
+    expect(month.unpricedModels).toContain('fake-model');
+    expect(month.costUsd).toBe(0);
+  });
 });

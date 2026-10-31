@@ -263,5 +263,7 @@ export async function planNode(
   return {
     messages: [aiMessage],
     budgetUsed: usage,
+    // 📌 **注入命中要带进权限闸** —— 只收紧给模型看的那份副本是空的
+    injectionMatches: scan.detected ? scan.matches : [],
   };
 }

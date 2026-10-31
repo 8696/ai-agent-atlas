@@ -11,7 +11,7 @@
 │ AntD 6     │                └──────────┬───────────┘         └──────────────┘
 └────────────┘                           │
                                  ┌─────┴──────┐
-                                 │ SQLite     │  对话 / trace / FTS5 索引
+                                 │ SQLite     │  对话 / 工具流水 / FTS5 索引
                                  │ 文件       │  提示词 / 记忆 / Skill / 配置
                                  └────────────┘
 ```
@@ -27,8 +27,8 @@
   路径沙箱 + 出网校验 + 命令黑名单三道闸
 - **长期记忆是 Markdown**：`MEMORY.md` / `USER.md` 两个文件，人能直接读直接改；
   跨会话检索走 SQLite FTS5（**不依赖 embedding 模型**）
-- **15 个内置工具**：文件 / 目录 / 搜索 / Shell / HTTP / 抓页 / 联网搜索 / 浏览器 /
-  沙箱代码 / 视觉 / 图像生成 / TTS / 时间
+- **12 个内置工具**：文件 / 目录 / 搜索 / Shell / HTTP / 抓页 / 联网搜索 / 浏览器 /
+  沙箱代码 / 时间
 - **技能会自己沉淀**：干完复杂的事，Agent 自动把经验写成可复用的 `SKILL.md`
 - **可扩展**：统一工具注册表 —— 内置工具、Skill 自带脚本、MCP server 暴露的工具走同一条路
 - **配置全在 `.env`**：模型（`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三行，
@@ -75,9 +75,7 @@
 > - **项目指令进上下文**：`AGENTS.md` 每轮注入（超长会截断，模型能自己读全文）
 > - **模型挂了自动顶上**：主模型失败且还没吐字 → 自动切备用模型
 >
-> A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B9 B10 B11 C1 C3 C4 C5 C6 D1 D2 D3 D4 E4 = ✅ ·
-> B8 / C2 = 🟡
-> （**C2 是 12 / 15 个工具** —— 差的是媒体三个，要第二组模型配置）。
+> **27 条需求全部 ✅**（A1~A5 · B1~B11 · C1~C6 · D1~D4 · E4）。
 > 状态表见 [docs/12-e §E5](./docs/12-e-需求-观测安全与验收.md)。
 >
 > 📋 **需求状态**：每条需求标题末尾带徽标（⬜ 未实现 / 🟡 部分实现 / ✅ 已实现），
@@ -109,7 +107,7 @@
 
 ```bash
 yarn install
-cp .env.example .env      # 填模型 API Key（用本地模型的话可以留空）
+cp .env.example .env      # 填模型 API Key（回环端点可以留空）
 yarn dev
 ```
 
@@ -137,7 +135,8 @@ yarn start
 | `yarn test`         | unit + integration                          |
 | `yarn test:e2e`     | Playwright（首次要先 `npx playwright install chromium`） |
 | `yarn migrate`      | 跑 pending 迁移                             |
-| `yarn backup`       | 备份业务库 + 记忆文件                        |
+| `yarn backup`       | 备份业务库 + 记忆文件（`backups/*.tar.gz`）  |
+| `yarn data:clean`   | 清测试残留（**默认干跑**，`--yes` 才真删）  |
 | `yarn env:check`    | 校验 `.env` / `.env.example` 结构一致        |
 
 ---
@@ -193,7 +192,7 @@ atlas-agent/
 │   ├── agent/       ★ LangGraph 编排层（state / graph / nodes / checkpointer / events）
 │   ├── tools/       工具注册表 + 内置 / Skill / MCP 工具
 │   ├── skills/      技能包：发现 / 匹配 / 注入 / 脚本工具 / 自演化
-│   ├── services/    业务：会话 / 记忆 / 提示词 / 模型 / 成本 / trace
+│   ├── services/    业务：会话 / 记忆 / 提示词 / 模型 / 成本 / 工具流水
 │   ├── gateway/     HTTP 路由
 │   ├── models/      Sequelize 模型
 │   ├── migrations/  umzug 迁移

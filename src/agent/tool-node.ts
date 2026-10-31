@@ -4,7 +4,7 @@ import { config } from '../config.js';
 import { writeAudit } from '../lib/audit.js';
 import { logger } from '../logger.js';
 import { decideTool, disabledTools } from '../lib/security/policy.js';
-import { scanInjection } from '../lib/security/injection.js';
+import { scanInjection, type InjectionScan } from '../lib/security/injection.js';
 import { maskString, maskValue } from '../lib/security/mask.js';
 import { markUntrusted, truncateOutput } from '../tools/output.js';
 import { getToolRegistry, type ToolRegistry } from '../tools/registry.js';
@@ -85,9 +85,9 @@ export function fingerprintOf(call: { name: string; args: unknown }): string {
 }
 
 /** 风险说明（**确认卡片上给用户看**） */
-function riskOf(tool: ToolDefinition): string {
+function riskOf(tool: ToolDefinition, sensitivity: ToolDefinition['sensitivity']): string {
   if (tool.riskNote) return tool.riskNote;
-  if (tool.sensitivity === 'high') {
+  if (sensitivity === 'high') {
     return '这是高危操作 —— 确认后会立即执行。';
   }
   return '这个操作需要你确认后才会执行。';
@@ -114,6 +114,13 @@ export interface RunToolCallOptions {
   registry?: ToolRegistry;
   /** 硬禁的工具（**如 `SHELL_ENABLED=false` 时的 `shell`**） */
   disabled?: ReadonlySet<string>;
+  /**
+   * 注入检测结果（**命中就把工具档位收紧**）。
+   *
+   * ⚠️ **必须传到权限闸** —— 只收紧「给模型看的那份副本」是空的
+   *    （见 [10 §10.7](../../docs/10-安全方案.md)）。
+   */
+  injection?: InjectionScan | undefined;
   /**
    * 事件回调（**工具卡片状态变化**）。
    *
@@ -196,11 +203,20 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
   }
 
   // ── 权限闸 ──
+  // 📌 **生效档位 = 注入命中就升到 `high`** —— 闸里按这个判，
+  //    确认卡片上的风险说明也按它写（见 [10 §10.7](../docs/10-安全方案.md)）
+  const effectiveSensitivity: ToolDefinition['sensitivity'] =
+    options.injection?.detected && tool.sensitivity !== 'high' ? 'high' : tool.sensitivity;
+
   const decision = decideTool(tool, {
     env: config,
     disabled: options.disabled ?? disabledTools(config),
     // 📌 **MCP server 粒度策略** —— 第三方来源默认 `ask`（见 [12-c C5](../docs/12-c-需求-工具技能与扩展.md)）
     mcpPolicy: mcpPolicyLookup,
+    // 📌 **入参要传进去** —— 命令黑名单在策略层判（见 [12-c C3](../docs/12-c-需求-工具技能与扩展.md)）
+    args: call.args,
+    // 📌 **注入命中 → 升档**（见 [10 §10.7](../docs/10-安全方案.md)）
+    injection: options.injection,
   });
 
   if (decision.decision === 'blocked' || decision.decision === 'reject') {
@@ -246,7 +262,7 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       toolCallId: call.id,
       toolName: tool.name,
       args: call.args,
-      risk: riskOf(tool),
+      risk: riskOf(tool, effectiveSensitivity),
       fingerprint,
     };
 
@@ -279,7 +295,7 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
 
     // ⚠️ **参数变了 → 重新确认** —— 不能沿用旧的批准
     if (resume.fingerprint && resume.fingerprint !== fingerprint) {
-      interrupt({ ...payload, risk: `${riskOf(tool)}（参数已变化，需要重新确认）` });
+      interrupt({ ...payload, risk: `${riskOf(tool, effectiveSensitivity)}（参数已变化，需要重新确认）` });
     }
   }
 

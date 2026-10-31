@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { resolvePath } from '../../config/paths.js';
 import { logger } from '../../logger.js';
+import { toolEnv } from '../../lib/security/env.js';
 
 /**
  * 沙箱会话 —— **父进程这一侧**（见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）。
@@ -90,17 +91,9 @@ function asText(value: unknown): string {
   }
 }
 
-/** 给子进程的环境（**只留最少的**） */
+/** 给子进程的环境（**只留最少的** —— 与 `shell` / 技能脚本同一套口径） */
 function sandboxEnv(): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH ?? '',
-    HOME: process.env.HOME ?? '',
-    LANG: process.env.LANG ?? 'zh_CN.UTF-8',
-    TZ: process.env.TZ ?? 'Asia/Shanghai',
-    NODE_ENV: 'development',
-    // ⚠️ **不给 NODE_OPTIONS / 代理变量 / 任何 API Key** ——
-    //    子进程不需要，给了就是白送
-  };
+  return toolEnv({ NODE_ENV: 'development' });
 }
 
 /**

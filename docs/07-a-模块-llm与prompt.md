@@ -9,7 +9,7 @@
 
 **职责**：把「用户配了哪些模型」变成「这一轮该用哪个 ChatModel 实例」。
 
-**输入**：`usage_scope`（`chat` / `memory` / `summary` / `vision` / `image` / `tts`）
+**输入**：`usage_scope`（`chat` / `memory` / `summary` / `retrieval` / `subagent` / `cron` / `skill`）
 **输出**：一个可调用的 ChatModel（已带 base_url / key / 参数 / 备用模型链）
 
 **关键约束**：

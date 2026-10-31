@@ -128,10 +128,22 @@ async function usageText(sessionId?: string): Promise<string> {
     '',
     `- 输入 token：${month.inputTokens}`,
     `- 输出 token：${month.outputTokens}`,
+    // 📌 **推理 token 单列** —— 它全额算输出，不拆开就看不出「思考」花了多少
+    ...(month.reasoningTokens > 0 ? [`- 其中推理 token：${month.reasoningTokens}`] : []),
+    ...(month.cachedTokens > 0 ? [`- 其中命中缓存：${month.cachedTokens}`] : []),
     `- 合计：${month.totalTokens} / 预算 ${budget.budget}（${Math.round(budget.ratio * 100)}%）`,
-    `- 费用：$${month.costUsd.toFixed(4)}${month.costUsd === 0 ? '（单价没配，见 `data/pricing.json`）' : ''}`,
+    `- 费用：$${month.costUsd.toFixed(4)}`,
     `- 调用次数：${month.entries}`,
   ];
+
+  // 📌 **没配单价的模型要说清楚** —— 费用显示 0 不等于「没花钱」
+  if (month.unpricedModels.length > 0) {
+    lines.push(
+      `> ⚠️ 有 ${month.unpricedModels.length} 个模型没配单价` +
+        `（${month.unpricedModels.map((name) => `\`${name}\``).join('、')}）—— ` +
+        '费用显示 0 是「不知道多少钱」，填 `data/pricing.json` 就有数字了。',
+    );
+  }
 
   if (session) {
     lines.push(
@@ -139,9 +151,18 @@ async function usageText(sessionId?: string): Promise<string> {
       '**本会话**',
       '',
       `- token：${session.totalTokens}（输入 ${session.inputTokens} / 输出 ${session.outputTokens}）`,
+      ...(session.reasoningTokens > 0 ? [`- 其中推理 token：${session.reasoningTokens}`] : []),
       `- 费用：$${session.costUsd.toFixed(4)}`,
       `- 调用次数：${session.entries}`,
     );
+    // 📌 **本会话里没配单价的模型也要说清楚**
+    if (session.unpricedModels.length > 0) {
+      lines.push(
+        `> ⚠️ 本会话用到的模型没配单价（${session.unpricedModels
+          .map((name) => `\`${name}\``)
+          .join('、')}）—— 费用显示 0 是「不知道多少钱」。`,
+      );
+    }
   }
 
   if (budget.warn) {

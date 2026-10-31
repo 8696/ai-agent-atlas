@@ -78,6 +78,8 @@ async function handleRpc(
     env: config,
     disabled: disabledTools(config),
     mcpPolicy: mcpPolicyLookup,
+    // 📌 **入参传进去** —— 命令黑名单在策略层判（见 [12-c C3](../docs/12-c-需求-工具技能与扩展.md)）
+    args: args ?? {},
   });
   if (decision.decision !== 'allow') {
     return {

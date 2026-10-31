@@ -369,7 +369,7 @@ describe('技能脚本', () => {
     expect(result.error).toMatch(/COMMAND_BLOCKED/);
   });
 
-  it('每个带脚本的技能生成一个工具，敏感档跟着技能声明走', () => {
+  it('⚠️ 每个带脚本的技能生成一个工具，脚本工具一律 high 档（声明的档位压不下去）', () => {
     installSkill(
       'hello-skill',
       { name: 'hello-skill', description: 'x', sensitivity: 'normal' },
@@ -383,7 +383,8 @@ describe('技能脚本', () => {
     const tool = skillScriptTool(skill);
     expect(tool?.name).toBe('skill_hello-skill');
     expect(tool?.source).toBe('skill');
-    expect(tool?.sensitivity).toBe('normal');
+    // 📌 **脚本就是执行代码** —— frontmatter 声明 `normal` 也不行，一律 `high`
+    expect(tool?.sensitivity).toBe('high');
     expect(tool?.description).toContain('scripts/hello.sh');
   });
 

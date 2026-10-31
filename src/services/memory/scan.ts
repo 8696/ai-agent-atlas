@@ -1,5 +1,6 @@
 import { scanInjection } from '../../lib/security/injection.js';
 import { looksLikeSecret } from '../../lib/security/mask.js';
+import { hasInvisibleChars } from '../../lib/security/invisible.js';
 
 /**
  * 记忆写入前的扫描 —— **写盘前过一遍**（见 [12-e E4](../docs/12-e-需求-观测安全与验收.md)）。
@@ -13,15 +14,6 @@ import { looksLikeSecret } from '../../lib/security/mask.js';
  * 2. **凭据外泄** —— 记忆里出现 API Key
  * 3. **不可见 Unicode** —— 零宽字符、双向控制符（能把文字「藏」起来）
  */
-
-/**
- * 不可见字符（**零宽 / 双向控制 / BOM / 标签字符**）。
- *
- * ⚠️ **写成转义序列** —— 源码里放真字符的话，编辑器里根本看不见，
- * 复制粘贴还可能把它弄丢。
- */
-const INVISIBLE_PATTERN =
-  /[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF\u{E0000}-\u{E007F}]/u;
 
 /** 扫描结果 */
 export interface MemoryScanResult {
@@ -49,7 +41,7 @@ export function scanMemoryWrite(text: string): MemoryScanResult {
     reasons.push('内容里像是有 API Key / 令牌');
   }
 
-  if (INVISIBLE_PATTERN.test(text)) {
+  if (hasInvisibleChars(text)) {
     reasons.push('内容里有不可见字符（零宽或双向控制符）');
   }
 

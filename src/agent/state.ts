@@ -171,6 +171,19 @@ export const AtlasState = Annotation.Root({
     default: () => 0,
   }),
 
+  /**
+   * 注入检测命中的特征（**空数组 = 没命中**）。
+   *
+   * ⚠️ **必须带到权限闸里** —— 只收紧「给模型看的那份副本」是空的
+   *    （闸读的是注册表里的原定义，见 [10 §10.7](../docs/10-安全方案.md)）。
+   *
+   * 📌 **只放特征名** —— 状态要能落盘（checkpointer 序列化进 SQLite）。
+   */
+  injectionMatches: Annotation<string[]>({
+    reducer: (_current, update) => update ?? [],
+    default: () => [],
+  }),
+
   /** 给用户看的一行提示（**比如「已达到步数上限」**） */
   notice: Annotation<string | null>({
     reducer: (_current, update) => update ?? null,

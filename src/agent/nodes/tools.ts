@@ -3,6 +3,7 @@ import type { BaseMessage } from '@langchain/core/messages';
 import { getWriter } from '@langchain/langgraph';
 import { config } from '../../config.js';
 import { decideTool, disabledTools } from '../../lib/security/policy.js';
+import type { InjectionScan } from '../../lib/security/injection.js';
 import { mcpPolicyLookup } from '../../tools/mcp/manager.js';
 import { getToolRegistry } from '../../tools/registry.js';
 import { runToolCall, fingerprintOf, type ToolCard } from '../tool-node.js';
@@ -33,6 +34,18 @@ interface ToolNodeState {
   sessionId?: string | undefined;
   messageId?: string | undefined;
   autoApprove?: string[] | undefined;
+  /** 注入检测命中的特征（**空 = 没命中**） */
+  injectionMatches?: string[] | undefined;
+}
+
+/**
+ * 把状态里的注入特征还原成扫描结果。
+ *
+ * ⚠️ **权限闸要的是「这个工具要不要升档」** —— 命中就升到 `high`。
+ */
+function injectionOf(matches: string[] | undefined): InjectionScan {
+  const list = matches ?? [];
+  return { detected: list.length > 0, matches: list };
 }
 
 /**
@@ -92,6 +105,7 @@ export function canRunInParallel(calls: AssembledToolCall[]): boolean {
       env: config,
       disabled,
       mcpPolicy: mcpPolicyLookup,
+      args: call.args,
     });
     if (decision.decision !== 'allow') return false;
   }
@@ -145,6 +159,8 @@ export async function toolsNode(
           ...(runnableConfig.signal ? { signal: runnableConfig.signal } : {}),
           rejected: new Set(state.rejectedToolCalls),
           autoApprove: new Set(state.autoApprove ?? []),
+          // 📌 **注入命中 → 权限闸升档**
+          injection: injectionOf(state.injectionMatches),
           emit: (card: ToolCard) => {
             emit?.({ type: 'tool-call', card });
           },
@@ -182,6 +198,8 @@ export async function toolsNode(
     rejected: new Set(state.rejectedToolCalls),
     // 📌 **显式放行的工具**（无人值守场景 —— 定时任务）
     autoApprove: new Set(state.autoApprove ?? []),
+    // 📌 **注入命中 → 权限闸升档**（见 [10 §10.7](../../docs/10-安全方案.md)）
+    injection: injectionOf(state.injectionMatches),
     emit: (card: ToolCard) => {
       emit?.({ type: 'tool-call', card });
     },

@@ -197,52 +197,61 @@ export interface UsageSummary {
   costUsd: number;
   /** 记了几条 */
   entries: number;
+  /**
+   * **没配单价的模型**（**费用显示 0 不等于免费**）。
+   *
+   * ⚠️ **单价表（`data/pricing.json`）没配的模型，费用只能记 0** ——
+   *    显示的时候要说清楚「是不知道多少钱」，不是「没花钱」。
+   */
+  unpricedModels: string[];
 }
 
 /** 本月用量（**按本地时区分桶**） */
 export async function monthlyUsage(now: Date = new Date()): Promise<UsageSummary> {
   const since = monthStartUtcString(config.TIMEZONE, now);
-  return aggregateUsage(
-    `SELECT COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
-            COALESCE(SUM(completion_tokens), 0) AS output_tokens,
-            COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
-            COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-            COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-            COALESCE(SUM(cost), 0) AS cost_usd,
-            COUNT(*) AS entries
-       FROM cost_logs
-      WHERE created_at >= :since`,
-    { since },
-  );
+  return aggregateUsage('created_at >= :since', { since });
 }
 
 /** 一个会话的用量 */
 export async function sessionUsage(sessionId: string): Promise<UsageSummary> {
-  return aggregateUsage(
-    `SELECT COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
-            COALESCE(SUM(completion_tokens), 0) AS output_tokens,
-            COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
-            COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
-            COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
-            COALESCE(SUM(cost), 0) AS cost_usd,
-            COUNT(*) AS entries
-       FROM cost_logs
-      WHERE session_id = :sessionId`,
-    { sessionId },
-  );
+  return aggregateUsage('session_id = :sessionId', { sessionId });
 }
 
-/** 跑一条汇总查询 */
+/**
+ * 跑一条汇总查询。
+ *
+ * ⚠️ **顺带查一次用过的模型** —— 用来判断「这个模型有没有配单价」。
+ *    没配单价时费用显示 0，但那**不是免费**，是「不知道多少钱」。
+ */
 async function aggregateUsage(
-  sql: string,
+  where: string,
   replacements: Record<string, unknown>,
 ): Promise<UsageSummary> {
   try {
-    const rows = await sequelize.query<Array<Record<string, unknown>>>(sql, {
-      replacements,
-      type: QueryTypes.SELECT,
-    });
+    const rows = await sequelize.query<Array<Record<string, unknown>>>(
+      `SELECT COALESCE(SUM(prompt_tokens), 0) AS input_tokens,
+              COALESCE(SUM(completion_tokens), 0) AS output_tokens,
+              COALESCE(SUM(prompt_tokens + completion_tokens), 0) AS total_tokens,
+              COALESCE(SUM(reasoning_tokens), 0) AS reasoning_tokens,
+              COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+              COALESCE(SUM(cost), 0) AS cost_usd,
+              COUNT(*) AS entries
+         FROM cost_logs
+        WHERE ${where}`,
+      { replacements, type: QueryTypes.SELECT },
+    );
     const row = (rows[0] ?? {}) as Record<string, unknown>;
+
+    // 📌 **哪些模型没有单价** —— 单价表没配的模型，费用只能记 0
+    const modelRows = await sequelize.query<{ model: string }>(
+      `SELECT DISTINCT model FROM cost_logs WHERE ${where}`,
+      { replacements, type: QueryTypes.SELECT },
+    );
+    const pricing = loadPricing();
+    const unpricedModels = modelRows
+      .map((item) => item.model)
+      .filter((name) => name !== '' && !pricing.models[name]);
+
     return {
       inputTokens: Number(row['input_tokens'] ?? 0),
       outputTokens: Number(row['output_tokens'] ?? 0),
@@ -251,6 +260,7 @@ async function aggregateUsage(
       cachedTokens: Number(row['cached_tokens'] ?? 0),
       costUsd: Math.round(Number(row['cost_usd'] ?? 0) * 1e6) / 1e6,
       entries: Number(row['entries'] ?? 0),
+      unpricedModels,
     };
   } catch (err) {
     logger.error({ err }, '统计用量失败');
@@ -262,6 +272,7 @@ async function aggregateUsage(
       cachedTokens: 0,
       costUsd: 0,
       entries: 0,
+      unpricedModels: [],
     };
   }
 }

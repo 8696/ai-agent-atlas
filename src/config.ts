@@ -2,6 +2,7 @@ import { config as loadDotenv } from 'dotenv';
 import { envSchema, validateRelations, type Env } from './config/schema.js';
 import { DIRS, FILES, PROJECT_ROOT, ensureDirs, resolvePath } from './config/paths.js';
 import { ensureFiles } from './config/ensure.js';
+import { isConfigSecretField, registerSecret } from './lib/security/mask.js';
 
 /**
  * 运行时配置 —— 启动时加载 + 校验，失败直接退出。
@@ -17,6 +18,14 @@ import { ensureFiles } from './config/ensure.js';
 
 // ⚠️ 必须在读任何配置**之前**加载，且路径来自项目根
 loadDotenv({ path: FILES.env });
+
+// ⚠️ **把配置里的密钥登记进打码表** —— 正则只认常见形态
+//    （本项目在用的智谱 key 是 `id.secret`，`sk-` 那条规则匹配不上），
+//    登记精确值才守得住「日志 / 流水 / 审计里搜不到明文密钥」这条
+//    （见 [12-e E4](./docs/12-e-需求-观测安全与验收.md)）。
+for (const [key, value] of Object.entries(process.env)) {
+  if (isConfigSecretField(key)) registerSecret(value);
+}
 
 function loadEnv(): Env {
   const parsed = envSchema.safeParse(process.env);
