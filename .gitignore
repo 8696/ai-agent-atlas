@@ -8,7 +8,8 @@ dist/
 dist-web/
 *.tsbuildinfo
 
-# 本地数据（对话 / 记忆 / 向量 / 工作区 / 密钥）——⚠️ 绝不能进 git
+# 本地数据（对话 / 工具流水 / 长期记忆 / 工作区）——⚠️ 绝不能进 git
+# ⚠️ 长期记忆（data/memory/）是**个人数据**，不进版本库；要迁移用 `yarn backup`
 data/
 backups/
 
@@ -34,5 +35,5 @@ coverage/
 .vscode/
 *.swp
 
-# 技能包（用户安装的第三方代码）
-.skills/
+# 本机私有权限（不共享）
+.claude/settings.local.json

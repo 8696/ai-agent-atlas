@@ -1,39 +1,11 @@
-import 'reflect-metadata';
-import Koa from 'koa';
-import bodyParser from 'koa-bodyparser';
-import cors from '@koa/cors';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { initDatabase } from './db.js';
-
-const app = new Koa();
-
-// 生产是同源部署 → 不挂 CORS 中间件；开发放开给 Vite
-if (config.NODE_ENV !== 'production') {
-  app.use(cors({ origin: '*' }));
-}
-app.use(bodyParser());
-app.use(async (ctx, next) => {
-  const started = Date.now();
-  await next();
-  logger.info(
-    { method: ctx.method, path: ctx.path, status: ctx.status, ms: Date.now() - started },
-    'request',
-  );
-});
-
-/** 健康检查（公开路由白名单之一） */
-app.use((ctx) => {
-  if (ctx.path === '/api/v1/health') {
-    ctx.body = { ok: true, service: 'atlas', version: '0.1.0' };
-    return;
-  }
-  ctx.status = 404;
-  ctx.body = { error: { code: 'NOT_FOUND', message: 'Not Found' } };
-});
+import { createApp } from './app.js';
 
 async function main() {
   await initDatabase();
+  const app = createApp();
   const server = app.listen(config.PORT, config.HOST, () => {
     logger.info({ host: config.HOST, port: config.PORT }, 'atlas backend listening');
   });

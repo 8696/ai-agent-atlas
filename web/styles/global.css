@@ -1,0 +1,128 @@
+/*
+ * 全局样式 —— 只放**antd token 表达不了**的东西。
+ *
+ * ⚠️ **页面里写死的浅色一律换成 antd token**（见 [04-a §4.1](../docs/04-a-ui-总则布局与菜单.md)）。
+ * 这里唯二写死的是 **代码高亮配色** —— 它跟着主题切，用 CSS 变量承接。
+ */
+
+:root {
+  --atlas-code-bg: #f6f8fa;
+  --atlas-code-fg: #24292f;
+  --atlas-code-keyword: #cf222e;
+  --atlas-code-string: #0a3069;
+  --atlas-code-number: #0550ae;
+  --atlas-code-comment: #6e7781;
+  --atlas-code-title: #8250df;
+}
+
+html[data-theme='dark'] {
+  --atlas-code-bg: #161b22;
+  --atlas-code-fg: #e6edf3;
+  --atlas-code-keyword: #ff7b72;
+  --atlas-code-string: #a5d6ff;
+  --atlas-code-number: #79c0ff;
+  --atlas-code-comment: #8b949e;
+  --atlas-code-title: #d2a8ff;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+/* 滚动条跟着主题切（见 [04-a §4.5](../docs/04-a-ui-总则布局与菜单.md)） */
+* {
+  scrollbar-width: thin;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.35);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(128, 128, 128, 0.55);
+}
+
+/* 行内代码 */
+.atlas-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--atlas-code-bg);
+  color: var(--atlas-code-fg);
+  font-size: 0.92em;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* 代码高亮（配色全走 CSS 变量 —— 切主题不用换 CSS） */
+.hljs {
+  background: var(--atlas-code-bg);
+  color: var(--atlas-code-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.hljs-comment,
+.hljs-quote {
+  color: var(--atlas-code-comment);
+  font-style: italic;
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag {
+  color: var(--atlas-code-keyword);
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-attribute {
+  color: var(--atlas-code-string);
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-variable,
+.hljs-template-variable {
+  color: var(--atlas-code-number);
+}
+
+.hljs-title,
+.hljs-section,
+.hljs-name,
+.hljs-selector-id,
+.hljs-selector-class {
+  color: var(--atlas-code-title);
+}
+
+.hljs-built_in,
+.hljs-type,
+.hljs-class .hljs-title {
+  color: var(--atlas-code-number);
+}
+
+/* Markdown 里的段落别贴太紧 */
+.atlas-markdown > *:first-child {
+  margin-top: 0;
+}
+
+.atlas-markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+/* 流式中的闪烁光标（见 [04-b §4.1.1](../docs/04-b-ui-聊天页.md)） */
+@keyframes atlas-blink {
+  to {
+    visibility: hidden;
+  }
+}

@@ -1,13 +1,16 @@
 import { Sequelize } from 'sequelize-typescript';
-import { config } from './config.js';
+import { paths } from './config.js';
 
 /**
  * 业务库连接（SQLite）。
- * ⚠️ 向量库是**另一个文件、另一个连接**（sqlite-vec）—— 不要往这儿塞。
+ *
+ * ⚠️ **用绝对路径**（`paths.databaseFile`）——
+ * 相对路径会被相对 `process.cwd()` 解析，
+ * 从别的目录启动就会**在错误的位置建一个新库**（最隐蔽的一类 bug）。
  */
 export const sequelize = new Sequelize({
   dialect: 'sqlite',
-  storage: config.DATABASE_PATH,
+  storage: paths.databaseFile,
   logging: false,
   pool: { max: 1, min: 0, idle: 10_000 },
 });

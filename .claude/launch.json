@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "atlas-backend",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["tsx", "src/server.ts"],
+      "port": 3100
+    },
+    {
+      "name": "atlas-frontend",
+      "runtimeExecutable": "yarn",
+      "runtimeArgs": ["vite"],
+      "port": 5180
+    }
+  ]
+}

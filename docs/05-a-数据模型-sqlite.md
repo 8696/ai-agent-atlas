@@ -6,29 +6,20 @@
 
 ## 5.1 核心表
 
-### 用户表（`users`）
+> ⚠️ **本项目没有 `tenant_id`，也没有 `user_id`** ——
+> 本地单用户、无鉴权（见 [12-a A1](./12-a-需求-应用外壳与上下文.md)），
+> 所有表都是单用户语义，**不需要行级归属过滤**。
 
-> 全库**只有一行**（本地唯一账号）。保留这张表是为了给记忆 / 对话 / 流水一个归属主体。
-
-| 字段             | 类型          | 说明                                        |
-| ---------------- | ------------- | ------------------------------------------- |
-| `id`             | INTEGER PK    |                                           |
-| `email`          | TEXT UNIQUE   | 登录名                                      |
-| `password_hash`  | TEXT          | bcrypt                                      |
-| `must_change_password` | INTEGER  | 1 = 强制改密（首次初始化为 1）             |
-| `preferences`    | TEXT          | JSON：主题、默认模型 scope 等 UI 偏好        |
-| `last_login_at`  | DATETIME      |                                           |
-| `created_at`     | DATETIME      |                                           |
-| `updated_at`     | DATETIME      |                                           |
-
-> ⚠️ `preferences` 是 JSON，SQLite 没有 JSON 类型 → 存 TEXT + 应用层序列化。
+> ⚠️ **所有路径相对「项目根」**（不是 cwd）——
+> `DATABASE_PATH` 的默认值 `data/atlas.db` 经 `resolvePath()` 解析成绝对路径，
+> 由 `paths.databaseFile` 提供（见 [02 §路径基准](./02-系统架构与目录.md)）。
+> ⚠️ **相对 cwd 会导致「在错误位置建一个新库」** —— 看着能跑，数据全空。
 
 ### 会话表（`sessions`）
 
 | 字段            | 类型          | 说明                                            |
 | --------------- | ------------- | ----------------------------------------------- |
 | `id`            | TEXT PK       | nanoid                                          |
-| `user_id`       | INTEGER       | 外键 → `users.id`                                |
 | `title`         | TEXT          | 首条用户消息截断生成；可手动改                   |
 | `status`        | TEXT          | `active` / `archived`                            |
 | `favorite`      | INTEGER       | 0/1                                             |
@@ -40,7 +31,7 @@
 | `created_at`    | DATETIME      |                                               |
 | `updated_at`    | DATETIME      |                                               |
 
-索引：`idx_sessions_user_last (user_id, last_active_at DESC)`、`idx_sessions_favorite (user_id, favorite)`。
+索引：`idx_sessions_last (last_active_at DESC)`、`idx_sessions_favorite (favorite)`。
 
 ### 消息表（`messages`）
 
@@ -48,7 +39,6 @@
 | ------------- | ---------- | ------------------------------------------------------------- |
 | `id`          | TEXT PK    | nanoid                                                        |
 | `session_id`  | TEXT       | 外键 → `sessions.id`                                           |
-| `user_id`     | INTEGER    | 外键 → `users.id`                                              |
 | `role`        | TEXT       | `user` / `assistant` / `system` / `tool`                       |
 | `content`     | TEXT       | 纯文本正文（Markdown 源）                                      |
 | `parts`       | TEXT       | **JSON 数组**：结构化 part（含工具调用卡片、待确认卡片）        |
@@ -64,77 +54,30 @@
 > ⚠️ **`parts` 是「刷新后卡片还在」的依据**：前端渲染工具卡片读的是落库的 `parts`，
 > 不是重新拉一次执行记录。改 part 结构要同时改前端渲染分支。
 
-### 模型配置表（`model_configs`）
+### 配置不在库里 ⚠️
 
-> 平台默认模型写在 `.env`；这里存的是**用户在 UI 里配的**（可多条、可切换、可分用途）。
-
-| 字段              | 类型     | 说明                                                        |
-| ----------------- | -------- | ----------------------------------------------------------- |
-| `id`              | TEXT PK  |                                                             |
-| `name`            | TEXT     | 显示名                                                       |
-| `provider`        | TEXT     | `anthropic` / `openai`                                      |
-| `base_url`        | TEXT     | 兼容端点地址；空 = 供应商默认                                |
-| `api_key_enc`     | TEXT     | **加密后**的 key（见 §5.4）                                  |
-| `model_id`        | TEXT     | 模型标识（发给供应商的 `model`）                             |
-| `usage_scope`     | TEXT     | `chat` / `memory` / `summary` / `embedding`                 |
-| `enabled`         | INTEGER  | 0/1                                                          |
-| `is_default`      | INTEGER  | 同 scope 内是否兜底                                          |
-| `fallback_model_id` | TEXT   | 同 scope 另一条；主模型失败时切                             |
-| `max_tokens`      | INTEGER  | 单次输出上限                                                 |
-| `temperature`     | REAL     |                                                             |
-| `thinking_budget` | INTEGER  | 推理预算（0 = 关）                                           |
-| `extra`           | TEXT     | JSON：供应商特有参数                                          |
-| `created_at` / `updated_at` | DATETIME |                                                     |
-
-索引：`idx_model_configs_scope (usage_scope, enabled)`。
-
-### 提示词版本表（`prompt_versions`）
-
-| 字段         | 类型     | 说明                                             |
-| ------------ | -------- | ------------------------------------------------ |
-| `id`         | TEXT PK  |                                                  |
-| `name`       | TEXT     | 提示词标识（如 `system` / `tool` / `memory`）    |
-| `version`    | INTEGER  | 递增版本号                                      |
-| `content`    | TEXT     | 正文                                             |
-| `status`     | TEXT     | `draft` / `published` / `archived`              |
-| `is_active`  | INTEGER  | 当前生效指针（每个 name 最多一行 1）            |
-| `created_at` / `updated_at` | DATETIME |                                      |
-
-> ⚠️ **「写生效指针」和「发布」必须在同一个事务里** ——
-> 否则会出现「版本已标成 published 但生效指针没换」的半成功，
-> 结果是租户/用户改了提示词但对话还跑旧的。
-
-### 通用配置表（`app_settings`）
-
-| 字段         | 类型     | 说明                        |
-| ------------ | -------- | --------------------------- |
-| `key`        | TEXT PK  | 配置项标识                  |
-| `value`      | TEXT     | 值的字符串形式（JSON 也存字符串） |
-| `value_type` | TEXT     | `string` / `number` / `boolean` / `json` |
-| `updated_at` | DATETIME |                            |
-
-> 配置项的**元信息（类型 / 范围 / 分类 / 说明）写在代码的 registry 里**，
-> 这张表只存用户改过的值 —— 跟当前项目「租户只存改过的值」一个路子。
-
-### 工具注册表（`tools`）
-
-> ⚠️ **模型看到的工具池 = 这张表 + Skill 自带工具 + MCP 暴露的工具**，
-> 三者用同一套 schema 汇进 `tools/registry.ts`。
-
-| 字段           | 类型     | 说明                                                      |
-| -------------- | -------- | --------------------------------------------------------- |
-| `id`           | TEXT PK  |                                                          |
-| `name`         | TEXT     | **模型看到的调用名**（唯一）                              |
-| `source`       | TEXT     | `builtin` / `skill` / `mcp`                               |
-| `description`  | TEXT     | **给模型看的描述** —— 改它就是「调教模型调不调它」       |
-| `parameters`   | TEXT     | JSON Schema（入参）                                       |
-| `enabled`      | INTEGER  | 0/1                                                       |
-| `sensitivity`  | TEXT     | `low` / `normal` / `high`（`high` = 需人工确认）          |
-| `source_ref`   | TEXT     | `source=skill` → skill 名；`source=mcp` → mcp server id   |
-| `config`       | TEXT     | JSON：工具私有配置（如超时、根目录）                      |
-| `created_at` / `updated_at` | DATETIME |                                                   |
-
-索引：`idx_tools_name (name)`（唯一）。
+> **本期没有配置界面**，配置一律在**代码 / 配置文件**里改，
+> 所以库里**只有运行时产生的数据**。
+>
+> | 配置什么       | 放在哪                                                          |
+> | -------------- | --------------------------------------------------------------- |
+> | 模型           | `.env` 的 `LLM_*`（纯标量：一个 Base URL + Key + 模型）      |
+> | 提示词         | `prompts/<name>.md`（文件；版本与回滚靠 git）                |
+> | 通用配置       | `.env`（散成一个个 key）                       |
+> | 工具元信息     | `tools/builtin/*` + `tools/registry.ts` + `SKILL.md` frontmatter  |
+> | MCP server     | `data/mcp.json`（文件；`.env` 里只留 `MCP_CONFIG_PATH`）      |
+> | 长期记忆       | `data/memory/MEMORY.md` + `data/memory/USER.md`                   |
+> | 定时任务       | `data/cron.json`（有运行时状态 `lastRunAt`，不能放 .env）      |
+>
+> ⚠️ **配置改完要重启**（提示词 / 上下文 / 记忆除外，下一轮即生效）——
+> 这是「配置在文件里」的既定代价，不要偷偷做热加载。
+>
+> ⚠️ **模型 API Key 只在 `.env`** —— 启动时读进内存即可，
+> 不落库、不写日志、不在任何接口里回显（见 §5.4）。
+>
+> **库里的表**：`sessions` · `messages` · `tool_call_logs` ·
+`messages_fts` / `memory_fts`（FTS5 虚表）· `graph_checkpoints` ·
+`cost_logs` · `audit_logs`。
 
 ### 工具调用流水（`tool_call_logs`）
 
@@ -155,46 +98,39 @@
 
 索引：`idx_tool_logs_session (session_id, created_at)`、`idx_tool_logs_tool (tool_name, created_at)`。
 
-### 长期记忆表（`memories`）
+### 长期记忆（Markdown 文件 + FTS5 索引）
 
-| 字段              | 类型     | 说明                                                  |
-| ----------------- | -------- | ----------------------------------------------------- |
-| `id`              | TEXT PK  |                                                      |
-| `user_id`         | INTEGER  |                                                      |
-| `kind`            | TEXT     | `preference`（偏好）/ `fact`（事实）/ `context`（情境）/ `profile`（画像） |
-| `content`         | TEXT     | 一条记忆 = 一条事实                                   |
-| `source`          | TEXT     | `auto`（自动抽取）/ `manual`（用户手写）              |
-| `confidence`      | REAL     | 0~1                                                  |
-| `status`          | TEXT     | `active` / `archived`（软删）                        |
-| `embedding`       | TEXT     | **JSON 数组**（归一化后的向量），同 `embedding_model` |
-| `embedding_model` | TEXT     | 生成它的模型名 —— 换模型后据此判定旧向量作废          |
-| `hit_count`       | INTEGER  | 被召回过几次                                          |
-| `created_at` / `updated_at` | DATETIME |                                          |
+> 记忆的真源是 **`data/memory/MEMORY.md`** 与 **`data/memory/USER.md`**
+> （对齐 Hermes 的 `MEMORY.md` / `USER.md`，见 [12-d D2](./12-d-需求-记忆与配置.md)）。
+> 库里只有它的 FTS5 索引（`memory_fts`），没有记忆本体表 —— 理由：
+> - 人能直接读、直接改、直接 `git diff`（这是选文件而不是选表的核心原因）
+> - 不需要 embedding 列，也就不需要 embedding 模型
+>   → **少一个依赖、少一个故障点**
+> - 单用户量级小（≤ 50 条自动记忆 + 手写几条），全文检索足够
+>
+> ⚠️ **代价**：Markdown 没有事务 → 写入必须是「重读 → 合并 → 原子写
+> （临时文件 + `rename`）」，见 [12-d D2](./12-d-需求-记忆与配置.md)。
+>
+> ⚠️ **条目元信息写在 frontmatter 里**（`kind` / `confidence` / `source` /
+> `status` / `updated`），正文一句话 —— 结构化到能被程序增删改。
 
-索引：`idx_memories_user_status (user_id, status)`。
+### 全文检索表（FTS5）
 
-> ⚠️ **向量存在这一行里，不放向量库**：
-> 量级小（单用户 ≤ 50 条自动记忆 + 手写几条），
-> 几百条向量在 DB 里算余弦是毫秒级；
-> 而且「有 `user_id` 就自动带上了归属」，不用在向量库那边再手写一遍过滤。
-> ⚠️ **代价**：换 embedding 模型后旧向量作废，要重算。
+> 跨会话检索（[12-d D3](./12-d-需求-记忆与配置.md)）靠 SQLite FTS5，
+> 不靠向量。两个虚表：
 
-### MCP 服务器表（`mcp_servers`）
+| 虚表            | 索引什么                                     | 同步方式                     |
+| --------------- | -------------------------------------------- | ---------------------------- |
+| `messages_fts`  | 会话消息正文（`messages.content`）            | 写消息时同步 insert           |
+| `memory_fts`    | 记忆条目（从 `data/memory/*.md` 解析进来的）  | 记忆文件变更时重建（量小，全量重建即可） |
 
-| 字段         | 类型     | 说明                                                  |
-| ------------ | -------- | ----------------------------------------------------- |
-| `id`         | TEXT PK  |                                                      |
-| `name`       | TEXT     | 显示名                                                |
-| `transport`  | TEXT     | `stdio` / `sse` / `http`                             |
-| `command`    | TEXT     | stdio 用的启动命令                                    |
-| `args`       | TEXT     | JSON 数组                                            |
-| `env`        | TEXT     | JSON 对象                                            |
-| `url`        | TEXT     | sse / http 用的地址                                   |
-| `enabled`    | INTEGER  |                                                      |
-| `tool_policy`| TEXT     | `ask`（默认每次确认）/ `auto` / `off`                |
-| `status`     | TEXT     | `disconnected` / `connected` / `error`                |
-| `last_error` | TEXT     |                                                      |
-| `created_at` / `updated_at` | DATETIME |                                          |
+- ⚠️ **分词器用 `tokenize='trigram'`**（SQLite ≥ 3.34）：
+  默认的 `unicode61` **不切中文** —— 一整句中文会被当成一个 token，
+  搜「跑一下测试」搜不到「我今天跑了一下单元测试」
+- ⚠️ **trigram 的代价**：查询词 **≥ 3 字符**；英文按 3 字符滑窗匹配（能用但慢）
+- ⚠️ **启动时探测可用性**（`pragma_compile_options()` 里查 `ENABLE_FTS5`）——
+  不可用就**退回「时间倒序取最近 N 条」**，功能少一半但**不影响对话**
+- 索引表只存文本，**不存向量**
 
 ### 图检查点表（`graph_checkpoints`）
 
@@ -216,53 +152,17 @@
 > ⚠️ **这张表是「进程重启后能续跑」的唯一保障**。
 > 用进程内的 MemorySaver = 重启后对话状态全丢（会话记录还在，但工具调用链断了）。
 
-### 调用链路表（`traces` / `spans`）
-
-**`traces`**（一轮对话 = 一条）
-
-| 字段          | 类型     | 说明                                  |
-| ------------- | -------- | ------------------------------------- |
-| `id`          | TEXT PK  |                                       |
-| `session_id`  | TEXT     |                                       |
-| `user_id`     | INTEGER  |                                       |
-| `kind`        | TEXT     | `chat` / `memory` / `summary` / `eval` |
-| `name`        | TEXT     | `chat.complete` 等                    |
-| `status`      | TEXT     | `success` / `error`                   |
-| `duration_ms` | INTEGER  | **用户感知耗时**（不含工具？含，见下） |
-| `input`       | TEXT     | JSON                                  |
-| `output`      | TEXT     | JSON                                  |
-| `error`       | TEXT     |                                       |
-| `created_at`  | DATETIME |                                       |
-
-**`spans`**（一个 trace 下多段）
-
-| 字段            | 类型     | 说明                                    |
-| --------------- | -------- | --------------------------------------- |
-| `id`            | TEXT PK  |                                         |
-| `trace_id`      | TEXT     |                                         |
-| `parent_span_id`| TEXT     | **父子关系**（工具调用、委派要串成树）  |
-| `name`          | TEXT     | `agent.plan` / `tool.invoke` / `llm.generate` |
-| `kind`          | TEXT     | `llm` / `tool` / `retrieval` / `agent` / `cost` |
-| `input` / `output` | TEXT | JSON                               |
-| `duration_ms`   | INTEGER  |                                         |
-| `created_at`    | DATETIME |                                         |
-
-索引：`idx_spans_trace (trace_id, created_at)`。
-
-> ⚠️ **`duration_ms` 的语义要写清楚**：对话 trace 的 duration = 用户感知耗时
-> （从收到请求到最后一个 chunk 吐完）；记忆抽取 / 摘要**另起一条 trace**，
-> 不挂在对话 trace 上 —— 否则「用户等了 12 秒」和「后台抽了个记忆」混在一起。
-
 ### 成本流水表（`cost_logs`）
+
+> **只用来算钱和控制预算**，不做分析报表。
 
 | 字段          | 类型      | 说明                                      |
 | ------------- | --------- | ----------------------------------------- |
 | `id`          | TEXT PK   |                                           |
-| `trace_id`    | TEXT      |                                           |
 | `session_id`  | TEXT      |                                           |
 | `provider`    | TEXT      |                                           |
 | `model`       | TEXT      |                                           |
-| `usage_scope` | TEXT      | `chat` / `memory` / `summary`             |
+| `usage_scope` | TEXT      | `chat` / `memory` / `summary` / `subagent` / `cron` |
 | `prompt_tokens`     | INTEGER |                                      |
 | `completion_tokens` | INTEGER |                                      |
 | `reasoning_tokens`  | INTEGER | ⚠️ 推理模型的思考 token **全额算输出**   |
@@ -272,6 +172,11 @@
 
 索引：`idx_cost_logs_session (session_id, created_at)`、`idx_cost_logs_created (created_at)`。
 
+> ⚠️ **这张表是预算闸的地基** —— 月度预算判断、硬拦都靠它
+> （见 [12-d D4](./12-d-需求-记忆与配置.md)）。
+> 删了它就没有「花了多少」的概念，也设不了上限。
+> ⚠️ **没有成本分析报表** —— 本地单用户靠 provider 侧的账单就够了。
+
 ### 操作审计表（`audit_logs`）
 
 > 本地也要有：改了模型配置、装了 Skill、接了 MCP server、删了记忆 —— 这些都留痕。
@@ -280,19 +185,11 @@
 | 字段         | 类型     | 说明                                |
 | ------------ | -------- | ----------------------------------- |
 | `id`         | TEXT PK  |                                     |
-| `user_id`    | INTEGER  |                                     |
 | `action`     | TEXT     | `MODEL_CREATED` / `SKILL_INSTALLED` / `MCP_ADDED` / `MEMORY_DELETED` … |
 | `target_type`| TEXT     |                                     |
 | `target_id`  | TEXT     |                                     |
 | `details`    | TEXT     | JSON（脱敏后）                      |
 | `created_at` | DATETIME |                                     |
-
-### 评测相关表（`evaluation_datasets` / `evaluation_items` / `evaluation_runs` / `evaluation_results`）
-
-> 结构与当前项目一致（见 [08](./08-评测方案.md)），此处只登记表名：
-> `evaluation_datasets` / `evaluation_items` / `evaluation_runs` / `evaluation_results`。
-> ⚠️ 跑批的 `run_trigger` 列**不能叫 `trigger`**（MySQL 保留字；SQLite 不报错但
-> 迁回 MySQL 会炸 —— 统一命名，避免以后换库踩坑）。
 
 ## 5.2 表关系
 
@@ -303,15 +200,15 @@ users 1───n sessions 1───n messages
               │
               ├──n messages
               ├──n tool_call_logs
-              ├──n traces 1───n spans
               ├──n cost_logs
-              └──n memories
+              └──n messages_fts / memory_fts（FTS5 虚表，非关系表）
 
-model_configs   prompt_versions   app_settings
-tools           mcp_servers
 audit_logs
 evaluation_*
 ```
+
+> ⚠️ **库里没有配置表，也没有账号表** ——
+> 配置在代码 / 配置文件里（见 §5.1「配置不在库里」），本期无鉴权、单用户。
 
 ## 5.3 时间与时区约定 ⚠️
 
@@ -327,13 +224,15 @@ evaluation_*
 
 | 数据         | 存储形式                       | 说明                                     |
 | ------------ | ------------------------------ | ---------------------------------------- |
-| 密码         | bcrypt hash                    | 永不返回给前端                           |
-| 模型 API Key | **AES-256-GCM 密文**          | 密钥来自 `CONFIG_ENCRYPTION_KEY`        |
+| 模型 API Key | **只存 `.env`，不入库**        | 启动时读进内存；不落库、不写日志、不回显 |
 | 工具入参/出参 | JSON 明文                   | ⚠️ 可能含敏感信息 —— 日志里要截断/打码   |
-| 记忆内容     | 明文                          | 本地文件，不外传                         |
+| 记忆内容     | 明文 Markdown 文件             | 本地文件，不外传；能进 git 的是用户自己决定 |
+| 对话内容     | 明文                          | 本地文件，不外传                         |
 
-> ⚠️ **`CONFIG_ENCRYPTION_KEY` 没配 = 不许保存模型 key**（不降级成明文）。
-> 配了之后**不能换** —— 换了旧密文解不开（会降级到平台默认凭据并告警）。
+> ⚠️ **模型 API Key 不入库**（只存 `.env`）——
+> 所以 `CONFIG_ENCRYPTION_KEY` 这个 env key **本期不需要**，
+> 留着一个没人用的加密密钥反而误导人。
+> ⚠️ **本期无鉴权** —— 没有账号，也就没有密码要存。
 
 ## 5.5 迁移规范
 
