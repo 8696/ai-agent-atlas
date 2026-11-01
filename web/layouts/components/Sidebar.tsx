@@ -13,14 +13,9 @@ import {
   StarOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { useSessionStore } from '../../lib/stores/sessionStore';
-import {
-  formatRelative,
-  TIME_BUCKET_LABELS,
-  TIME_BUCKET_ORDER,
-  timeBucket,
-  type TimeBucket,
-} from '../../lib/time';
+import { useSidebarStore } from '../../lib/stores/sessionStore';
+import { formatRelative, TIME_BUCKET_LABELS, TIME_BUCKET_ORDER, timeBucket, type TimeBucket } from '../../lib/time';
+import { formatTokens } from '../../lib/format';
 import type { SessionSummary } from '../../lib/api';
 
 /**
@@ -47,16 +42,16 @@ export function Sidebar() {
   const [searchParams] = useSearchParams();
   const [collapsed, setCollapsed] = useState(false);
 
-  const items = useSessionStore((state) => state.items);
-  const loading = useSessionStore((state) => state.loading);
-  const query = useSessionStore((state) => state.query);
-  const favoriteOnly = useSessionStore((state) => state.favoriteOnly);
-  const load = useSessionStore((state) => state.load);
-  const setQuery = useSessionStore((state) => state.setQuery);
-  const setFavoriteOnly = useSessionStore((state) => state.setFavoriteOnly);
-  const toggleFavorite = useSessionStore((state) => state.toggleFavorite);
-  const rename = useSessionStore((state) => state.rename);
-  const remove = useSessionStore((state) => state.remove);
+  const items = useSidebarStore((state) => state.items);
+  const loading = useSidebarStore((state) => state.loading);
+  const query = useSidebarStore((state) => state.query);
+  const favoriteOnly = useSidebarStore((state) => state.favoriteOnly);
+  const load = useSidebarStore((state) => state.load);
+  const setQuery = useSidebarStore((state) => state.setQuery);
+  const setFavoriteOnly = useSidebarStore((state) => state.setFavoriteOnly);
+  const toggleFavorite = useSidebarStore((state) => state.toggleFavorite);
+  const rename = useSidebarStore((state) => state.rename);
+  const remove = useSidebarStore((state) => state.remove);
 
   const currentSessionId = location.pathname === '/chat' ? searchParams.get('session') : null;
 
@@ -157,6 +152,16 @@ export function Sidebar() {
                 <span>历史会话</span>
                 <RightOutlined className="atlas-sider-section-arrow" aria-hidden />
               </button>
+              <button
+                type="button"
+                className="atlas-sider-section-link"
+                onClick={() => {
+                  void navigate('/stats');
+                }}
+              >
+                <span>用量统计</span>
+                <RightOutlined className="atlas-sider-section-arrow" aria-hidden />
+              </button>
             </div>
           </>
         )}
@@ -184,6 +189,7 @@ export function Sidebar() {
                     active={item.id === currentSessionId}
                     time={formatRelative(item.lastActiveAt)}
                     messageCount={item.messageCount}
+                    totalTokens={item.totalTokens}
                     onOpen={() => goChat(item.id)}
                     onToggleFavorite={() => void toggleFavorite(item.id)}
                     onRemove={() => void remove(item.id)}
@@ -244,6 +250,8 @@ function SessionRow(props: {
   active: boolean;
   time: string;
   messageCount: number;
+  /** 这个会话的 token 数（**为 0 就不显示** —— 「没花过」不用占地方） */
+  totalTokens: number;
   onOpen: () => void;
   onToggleFavorite: () => void;
   onRemove: () => void;
@@ -290,6 +298,11 @@ function SessionRow(props: {
         <span className="atlas-session-meta">
           <span className="atlas-session-time">{props.time}</span>
           <span className="atlas-session-count">{props.messageCount} 条消息</span>
+          {props.totalTokens > 0 ? (
+            <span className="atlas-session-count" title={`${props.totalTokens} token`}>
+              {formatTokens(props.totalTokens)} token
+            </span>
+          ) : null}
         </span>
       </button>
       {/* 📌 **操作按钮浮在标题上方** —— 不再挤占标题宽度 */}

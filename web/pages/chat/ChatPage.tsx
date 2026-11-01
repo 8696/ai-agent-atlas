@@ -8,7 +8,7 @@ import { Composer } from './Composer';
 import { MessageList } from './MessageList';
 import { toUserMessage } from '../../lib/apiError';
 import { useModelStore } from '../../lib/stores/modelStore';
-import { useSessionStore } from '../../lib/stores/sessionStore';
+import { useSidebarStore } from '../../lib/stores/sessionStore';
 import { createSession, confirmToolCall, fetchSession } from '../../lib/api';
 import type { StoredMessage } from '../../lib/api';
 
@@ -40,8 +40,8 @@ export function ChatPage() {
   // ⚠️ **transport 只建一次** —— 每次渲染新建会让 useChat 重新发请求
   const transport = useMemo(() => new DefaultChatTransport({ api: '/api/v1/chat' }), []);
 
-  const upsertSession = useSessionStore((state) => state.upsert);
-  const loadSessions = useSessionStore((state) => state.load);
+  const upsertSession = useSidebarStore((state) => state.upsert);
+  const loadSessions = useSidebarStore((state) => state.load);
 
   const { messages, sendMessage, status, stop, error, regenerate, clearError, setMessages } =
     useChat({

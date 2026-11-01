@@ -790,6 +790,52 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
   padding: 48px 16px;
 }
 
+/* ── 用量统计页（见 [12-d D7](../../docs/12-d-需求-记忆与配置.md)） ─────────── */
+
+.atlas-stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.atlas-stat-card {
+  background: var(--atlas-surface);
+  border: 1px solid var(--atlas-line);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+
+.atlas-stat-label {
+  font-size: 12px;
+  color: var(--atlas-muted);
+}
+
+.atlas-stat-value {
+  margin-top: 4px;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-stat-hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--atlas-muted);
+}
+
+.atlas-token {
+  font-variant-numeric: tabular-nums;
+}
+
+.atlas-stats-note {
+  margin: 12px 2px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--atlas-muted);
+}
+
 .atlas-link {
   padding: 0;
   border: 0;
@@ -952,6 +998,16 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
   padding: 0.1em 0 0.1em 0.9em;
   border-left: 3px solid var(--atlas-accent);
   color: var(--atlas-muted);
+}
+
+/* 宽表格横向滚动 —— 别把气泡撑破（见 [04-b §4.1.1](../docs/04-b-ui-聊天页.md)） */
+.atlas-markdown-table {
+  overflow-x: auto;
+  margin: 0.8em 0;
+}
+
+.atlas-markdown-table > table {
+  margin: 0;
 }
 
 .atlas-markdown table {

@@ -8,6 +8,7 @@ import { AppError, registerSecret } from './lib/errors.js';
 import { resolveCorsOrigin } from './lib/cors.js';
 import { chatRouter } from './gateway/chat-routes.js';
 import { sessionRouter } from './gateway/session-routes.js';
+import { statsRouter } from './gateway/stats-routes.js';
 
 /**
  * Koa 应用装配 —— **与「启动」分开**。
@@ -68,6 +69,10 @@ export function createApp(): Koa {
   /** 会话与消息（`/api/v1/sessions` · `/api/v1/messages/:id/favorite`） */
   app.use(sessionRouter.routes());
   app.use(sessionRouter.allowedMethods());
+
+  /** 用量统计（`/api/v1/stats/usage`） */
+  app.use(statsRouter.routes());
+  app.use(statsRouter.allowedMethods());
 
   /** 健康检查（公开路由白名单之一） */
   app.use((ctx) => {

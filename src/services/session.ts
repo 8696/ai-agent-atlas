@@ -1,9 +1,11 @@
-import { Op, QueryTypes, Sequelize } from 'sequelize';
+import { Op, QueryTypes, Sequelize, col, fn } from 'sequelize';
 import type { WhereOptions } from 'sequelize';
 import { nanoid } from 'nanoid';
 import { sequelize } from '../db.js';
+import { logger } from '../logger.js';
 import { Message } from '../models/message.model.js';
 import { Session } from '../models/session.model.js';
+import { CostLog } from '../models/cost-log.model.js';
 import { utcDaysAgo, utcNow, utcToIso } from '../lib/time.js';
 import { clearPending } from './pending-confirm.js';
 import { DEFAULT_TITLE } from '../lib/session-title.js';
@@ -25,22 +27,66 @@ export interface SessionView {
   status: string;
   favorite: boolean;
   messageCount: number;
+  /**
+   * 这个会话一共用了多少 token（**输入 + 输出**）。
+   *
+   * 📌 **数据源是 `cost_logs`** —— 每轮对话记一条，
+   *    所以这里的数跟 `/usage` 命令、`yarn cost:report` 是同一个口径
+   *    （见 [12-d D7](../docs/12-d-需求-记忆与配置.md)）。
+   */
+  totalTokens: number;
   lastActiveAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
 }
 
-function toView(session: Session): SessionView {
+function toView(session: Session, totalTokens = 0): SessionView {
   return {
     id: session.id,
     title: session.title || DEFAULT_TITLE,
     status: session.status,
     favorite: session.favorite === 1,
     messageCount: session.message_count,
+    totalTokens,
     lastActiveAt: utcToIso(session.last_active_at),
     createdAt: utcToIso(session.created_at),
     updatedAt: utcToIso(session.updated_at),
   };
+}
+
+/**
+ * 一次取多个会话的 token 合计。
+ *
+ * 📌 **单独一条聚合查询** —— 不给 `sessions` 表加列：
+ * 用量在 `cost_logs` 里，会话表只存会话本身。
+ *
+ * ⚠️ **表还没建就当全是 0** —— 新机器上迁移没跑完不该把列表页搞崩。
+ */
+async function tokenTotals(sessionIds: string[]): Promise<Map<string, number>> {
+  const result = new Map<string, number>();
+  if (sessionIds.length === 0) return result;
+  try {
+    const rows = await CostLog.findAll({
+      attributes: [
+        'session_id',
+        [fn('SUM', col('prompt_tokens')), 'input_tokens'],
+        [fn('SUM', col('completion_tokens')), 'output_tokens'],
+      ],
+      where: { session_id: { [Op.in]: sessionIds } },
+      group: ['session_id'],
+      raw: true,
+    });
+    for (const row of rows) {
+      const id = (row as { session_id?: unknown }).session_id;
+      if (typeof id !== 'string') continue;
+      const input = Number((row as { input_tokens?: unknown }).input_tokens ?? 0);
+      const output = Number((row as { output_tokens?: unknown }).output_tokens ?? 0);
+      result.set(id, input + output);
+    }
+  } catch (err) {
+    logger.error({ err }, '统计会话 token 失败 —— 按 0 算');
+  }
+  return result;
 }
 
 /** 新建会话（**`thread_id` = 会话 id** —— LangGraph 的 thread 就是会话） */
@@ -70,7 +116,9 @@ export async function findSession(id: string): Promise<Session | null> {
 /** 取会话视图（找不到返回 null） */
 export async function getSessionView(id: string): Promise<SessionView | null> {
   const session = await findSession(id);
-  return session ? toView(session) : null;
+  if (!session) return null;
+  const totals = await tokenTotals([id]);
+  return toView(session, totals.get(id) ?? 0);
 }
 
 export interface ListSessionsParams {
@@ -125,7 +173,15 @@ export async function listSessions(params: ListSessionsParams = {}): Promise<Lis
     offset: (page - 1) * pageSize,
   });
 
-  return { items: rows.map(toView), total: count, page, pageSize };
+  // 📌 **这一页的 token 合计** —— 只查当前页的会话，不扫全库
+  const totals = await tokenTotals(rows.map((row) => row.id));
+
+  return {
+    items: rows.map((row) => toView(row, totals.get(row.id) ?? 0)),
+    total: count,
+    page,
+    pageSize,
+  };
 }
 
 /** 改标题（**空标题 = 回到默认标题**） */
@@ -135,7 +191,10 @@ export async function renameSession(id: string, title: string): Promise<SessionV
   session.title = title.trim();
   session.updated_at = utcNow();
   await session.save();
-  return toView(session);
+  // 📌 **token 数一起带回去** —— 前端是整条替换，
+  //    少了这个字段，改完名列表里的 token 就变成 0 了
+  const totals = await tokenTotals([id]);
+  return toView(session, totals.get(id) ?? 0);
 }
 
 /** 设收藏态（**`favorite` 传 undefined = 切换**） */
@@ -148,7 +207,8 @@ export async function setSessionFavorite(
   session.favorite = favorite === undefined ? (session.favorite === 1 ? 0 : 1) : favorite ? 1 : 0;
   session.updated_at = utcNow();
   await session.save();
-  return toView(session);
+  const totals = await tokenTotals([id]);
+  return toView(session, totals.get(id) ?? 0);
 }
 
 /** 表在不在（`tool_call_logs` / `graph_checkpoints` 由别的需求建） */

@@ -17,6 +17,7 @@ import { useThemeStore } from '../../lib/stores/themeStore';
 const TITLES: Record<string, string> = {
   '/chat': '聊天',
   '/sessions': '历史会话',
+  '/stats': '用量统计',
 };
 
 export function Topbar() {

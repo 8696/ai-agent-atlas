@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import hljs from 'highlight.js/lib/common';
 import { Button, Tooltip, theme } from 'antd';
 import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
@@ -9,6 +10,12 @@ import { CopyOutlined, CheckOutlined } from '@ant-design/icons';
  *
  * ⚠️ **不渲染原始 HTML** —— `react-markdown` 默认不解析 HTML，
  * 模型返回的内容里带 `<script>` 也只是文本。
+ *
+ * ⚠️ **必须挂 `remark-gfm`** —— `react-markdown` 默认只走 CommonMark，
+ * 而 CommonMark **没有表格语法**（表格是 GFM 扩展）。
+ * 不挂这个插件，模型输出的 `| 列 | 列 |` 会被当普通段落，
+ * 用户看到的是一堆竖线而不是表格。
+ * 挂了之后 GFM 全套都生效：表格 · 删除线 · 任务列表 · 自动链接。
  *
  * ⚠️ **高亮配色跟着主题走** —— 颜色写在 `styles/global.css` 的 CSS 变量里，
  * 切深色时不用重新加载 CSS。
@@ -73,6 +80,7 @@ function CodeBlock({ html, raw, language }: { html: string; raw: string; languag
 export function Markdown({ children }: { children: string }) {
   return (
     <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
       components={{
         // ⚠️ 代码块自己渲染 —— 不要再套一层 <pre>
         pre: ({ children }) => <>{children}</>,
@@ -92,6 +100,13 @@ export function Markdown({ children }: { children: string }) {
           <a href={href} target="_blank" rel="noreferrer noopener">
             {children}
           </a>
+        ),
+        // ⚠️ **表格套一层可横向滚动的容器** —— 宽表格会撑破气泡
+        //    （`table` 组件替换的就是 <table> 本身，别把标签丢了）
+        table: ({ children }) => (
+          <div className="atlas-markdown-table">
+            <table>{children}</table>
+          </div>
         ),
       }}
     >

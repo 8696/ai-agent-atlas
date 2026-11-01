@@ -223,7 +223,7 @@ export async function sessionUsage(sessionId: string): Promise<UsageSummary> {
  * ⚠️ **顺带查一次用过的模型** —— 用来判断「这个模型有没有配单价」。
  *    没配单价时费用显示 0，但那**不是免费**，是「不知道多少钱」。
  */
-async function aggregateUsage(
+export async function aggregateUsage(
   where: string,
   replacements: Record<string, unknown>,
 ): Promise<UsageSummary> {

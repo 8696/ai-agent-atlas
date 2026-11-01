@@ -52,6 +52,13 @@ export interface SessionSummary {
   /** 会话级收藏 */
   favorite: boolean;
   messageCount: number;
+  /**
+   * 这个会话一共用了多少 token（**输入 + 输出**）。
+   *
+   * 📌 **口径跟 `/usage` 命令一致** —— 数据源是 `cost_logs`
+   *    （见 [12-d D7](../../docs/12-d-需求-记忆与配置.md)）。
+   */
+  totalTokens: number;
   lastActiveAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
@@ -157,6 +164,83 @@ export async function toggleMessageFavorite(
   const { data } = await api.patch<StoredMessage>(`/messages/${id}/favorite`, {
     ...(favorite === undefined ? {} : { favorite }),
   });
+  return data;
+}
+
+/* ── 用量统计（见 [12-d D7](../../docs/12-d-需求-记忆与配置.md)） ───────────── */
+
+/** 一段用量的汇总 */
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  /** 推理 token（全额算输出） */
+  reasoningTokens: number;
+  /** 命中缓存的输入 token */
+  cachedTokens: number;
+  costUsd: number;
+  /** 记了几条 */
+  entries: number;
+  /** ⚠️ **没配单价的模型** —— 费用显示 0 不等于免费 */
+  unpricedModels: string[];
+}
+
+/** 一个会话的用量 */
+export interface SessionUsage {
+  id: string;
+  title: string;
+  messageCount: number;
+  lastActiveAt: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  reasoningTokens: number;
+  cachedTokens: number;
+  costUsd: number;
+  entries: number;
+}
+
+/** 一个模型的用量 */
+export interface ModelUsage {
+  model: string;
+  entries: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+/** 一个用途的用量 */
+export interface ScopeUsage {
+  scope: string;
+  entries: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  costUsd: number;
+}
+
+/** 统计页的数据 */
+export interface UsageStatsResponse {
+  /** 全库合计（**含没有会话归属的用量**） */
+  total: UsageTotals;
+  /** 本月合计 */
+  month: UsageTotals;
+  /** 会话总数 */
+  sessionCount: number;
+  /** ⚠️ **没有会话归属的 token**（记忆抽取 / 检索摘要） */
+  unattributedTokens: number;
+  /** 按会话拆（token 倒序） */
+  sessions: SessionUsage[];
+  /** 按模型拆 */
+  models: ModelUsage[];
+  /** 按用途拆 */
+  scopes: ScopeUsage[];
+}
+
+/** 拉用量统计（**统计页的数据源**） */
+export async function fetchUsageStats(): Promise<UsageStatsResponse> {
+  const { data } = await api.get<UsageStatsResponse>('/stats/usage');
   return data;
 }
 

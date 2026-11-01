@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Typography } from 'antd';
+import { Button, Empty, Input, Modal, Popconfirm, Space, Table, Tag, Tooltip, Typography } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
   DeleteOutlined,
@@ -10,8 +10,9 @@ import {
   StarOutlined,
 } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
-import { useSessionStore } from '../../lib/stores/sessionStore';
+import { useSessionsStore } from '../../lib/stores/sessionStore';
 import { formatDateTime, formatRelative } from '../../lib/time';
+import { formatCount, formatTokens } from '../../lib/format';
 import type { SessionSummary } from '../../lib/api';
 
 /**
@@ -23,21 +24,21 @@ import type { SessionSummary } from '../../lib/api';
 export function SessionsPage() {
   const navigate = useNavigate();
 
-  const items = useSessionStore((state) => state.items);
-  const total = useSessionStore((state) => state.total);
-  const page = useSessionStore((state) => state.page);
-  const pageSize = useSessionStore((state) => state.pageSize);
-  const loading = useSessionStore((state) => state.loading);
-  const error = useSessionStore((state) => state.error);
-  const query = useSessionStore((state) => state.query);
-  const favoriteOnly = useSessionStore((state) => state.favoriteOnly);
-  const load = useSessionStore((state) => state.load);
-  const setQuery = useSessionStore((state) => state.setQuery);
-  const setFavoriteOnly = useSessionStore((state) => state.setFavoriteOnly);
-  const setPage = useSessionStore((state) => state.setPage);
-  const toggleFavorite = useSessionStore((state) => state.toggleFavorite);
-  const rename = useSessionStore((state) => state.rename);
-  const remove = useSessionStore((state) => state.remove);
+  const items = useSessionsStore((state) => state.items);
+  const total = useSessionsStore((state) => state.total);
+  const page = useSessionsStore((state) => state.page);
+  const pageSize = useSessionsStore((state) => state.pageSize);
+  const loading = useSessionsStore((state) => state.loading);
+  const error = useSessionsStore((state) => state.error);
+  const query = useSessionsStore((state) => state.query);
+  const favoriteOnly = useSessionsStore((state) => state.favoriteOnly);
+  const load = useSessionsStore((state) => state.load);
+  const setQuery = useSessionsStore((state) => state.setQuery);
+  const setFavoriteOnly = useSessionsStore((state) => state.setFavoriteOnly);
+  const setPage = useSessionsStore((state) => state.setPage);
+  const toggleFavorite = useSessionsStore((state) => state.toggleFavorite);
+  const rename = useSessionsStore((state) => state.rename);
+  const remove = useSessionsStore((state) => state.remove);
 
   const [searchText, setSearchText] = useState(query);
   const [selected, setSelected] = useState<string[]>([]);
@@ -103,6 +104,20 @@ export function SessionsPage() {
       key: 'messageCount',
       width: 90,
       align: 'right',
+    },
+    {
+      // 📌 **每个会话的 token 数** —— 哪场对话最费，一眼看得出来
+      //    （见 [12-d D7](../../../docs/12-d-需求-记忆与配置.md)）
+      title: 'Token',
+      dataIndex: 'totalTokens',
+      key: 'totalTokens',
+      width: 100,
+      align: 'right',
+      render: (value: number) => (
+        <Tooltip title={`${formatCount(value)} token`}>
+          <span className="atlas-token">{formatTokens(value)}</span>
+        </Tooltip>
+      ),
     },
     {
       title: '最后活跃',
