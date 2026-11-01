@@ -294,7 +294,7 @@
   | **改完代码（默认动作）**   | `yarn run check && yarn test:unit`          | < 20s |
   | 改了某个源文件             | `yarn test:related <改动的文件>`        | 秒级  |
   | 准备交付这条需求           | `yarn test`（全量）                     | 分钟  |
-  | 改了 UI 交互               | **不跑自动化测试**（见下方「UI 例外」）   | —     |
+  | 改了 UI 交互               | **不跑自动化测试**（UI 例外）            | —     |
 
   ⚠️ **不要默认跑全量** —— 全量是「交付前」的动作，不是「改完」的动作
   ⚠️ **`yarn run check` = typecheck 与 lint 并行**（`concurrently`）——
