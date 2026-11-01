@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Spin } from 'antd';
+import { Button } from 'antd';
 import { ArrowRightOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
@@ -137,6 +137,25 @@ function Caret() {
   return <span className="atlas-caret" aria-hidden />;
 }
 
+/**
+ * 「正在生成」的三个点 —— **等第一个字时的占位**。
+ *
+ * ⚠️ **没有它就像卡住了** —— AI 气泡先建出来、内容后到，
+ *    中间那段空窗（模型首字延迟，通常好几秒）一点动静都没有。
+ * 📌 **两段空窗都要盖住**：
+ * ① 发出去 → 服务端把气泡建出来之前（网络往返）
+ * ② 气泡建好 → 第一个字到之前（首字延迟）
+ */
+function TypingDots() {
+  return (
+    <span className="atlas-typing" role="status" aria-label="正在生成回复">
+      <span className="atlas-typing-dot" />
+      <span className="atlas-typing-dot" />
+      <span className="atlas-typing-dot" />
+    </span>
+  );
+}
+
 /** 思考 —— 进行中展开并跟着滚到底；结束后收起。点标题可再打开。 */
 function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(live);
@@ -193,6 +212,33 @@ export function MessageList({
     return null;
   }, [messages]);
 
+  /**
+   * 这一轮还在跑 —— **提交了（submitted）+ 在流（streaming）**。
+   *
+   * ⚠️ **别只看 `streaming`** —— AI SDK 在收到 `start` chunk 时
+   * 是带着 `updateStatus: false` 写状态的，所以**从发出到第一个字到**
+   * 这一整段状态都是 `submitted`（不等第一个字就没有 `streaming`）。
+   * 只认 `streaming` 的话，**等首字的那几秒里什么都不显示**。
+   */
+  const busy = status === 'submitted' || status === 'streaming';
+
+  const lastMessage = messages[messages.length - 1];
+
+  /**
+   * **AI 还没开口** —— 用户刚发完，AI 气泡都还没建出来。
+   *
+   * 📌 **这时要先占一个位** —— 不然界面只剩用户那句话，像没反应。
+   */
+  const awaitingReply = busy && lastMessage?.role === 'user';
+
+  /**
+   * **正在生成的那条消息** —— 必须是**最后一条**且是 assistant。
+   *
+   * ⚠️ **不能用「最后一条 AI 消息」当它** —— 气泡还没建出来的时候，
+   * 那指的是**上一轮**已经答完的消息（光标会跑到旧答案尾巴上）。
+   */
+  const liveId = busy && lastMessage?.role === 'assistant' ? lastMessage.id : null;
+
   if (messages.length === 0) {
     return (
       <div className="atlas-welcome">
@@ -225,10 +271,12 @@ export function MessageList({
         const text = partText(message, 'text');
         const reasoning = partText(message, 'reasoning');
         const isUser = message.role === 'user';
-        const streaming = status === 'streaming' && message.id === lastAssistantId;
+        const streaming = message.id === liveId;
         const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
         const blocks = toBlocks(message);
         const command = commandOf(message);
+        /** 这条消息**一个字都还没有** —— 等第一个字 */
+        const empty = blocks.length === 0 && reasoning.length === 0;
 
         if (isUser) {
           return (
@@ -282,32 +330,48 @@ export function MessageList({
                   </div>
                 );
               })}
-              {streaming && blocks.length === 0 ? <Spin size="small" /> : null}
-              <div className="atlas-ai-tools">
-                {/* 📌 消息级收藏（见 [04-b §4.2](../docs/04-b-ui-聊天页.md)） */}
-                <Button
-                  type="text"
-                  size="small"
-                  className="atlas-pin"
-                  aria-label={favorites[message.id] ? '取消收藏这条消息' : '收藏这条消息'}
-                  aria-pressed={favorites[message.id] === true}
-                  icon={favorites[message.id] ? <PushpinFilled /> : <PushpinOutlined />}
-                  onClick={() => onToggleFavorite(message.id)}
-                />
-                {!streaming && message.id === lastAssistantId ? (
-                  <button
-                    type="button"
-                    className="atlas-redo"
-                    onClick={() => onRegenerate(message.id)}
-                  >
-                    重新生成
-                  </button>
-                ) : null}
-              </div>
+              {streaming && empty ? <TypingDots /> : null}
+              {/* 📌 **空的、还在跑的消息不挂工具行** —— 收藏/重新生成对一条
+                  还没出字的消息没意义，按钮杵在那儿反而像卡住了 */}
+              {streaming && empty ? null : (
+                <div className="atlas-ai-tools">
+                  {/* 📌 消息级收藏（见 [04-b §4.2](../docs/04-b-ui-聊天页.md)） */}
+                  <Button
+                    type="text"
+                    size="small"
+                    className="atlas-pin"
+                    aria-label={favorites[message.id] ? '取消收藏这条消息' : '收藏这条消息'}
+                    aria-pressed={favorites[message.id] === true}
+                    icon={favorites[message.id] ? <PushpinFilled /> : <PushpinOutlined />}
+                    onClick={() => onToggleFavorite(message.id)}
+                  />
+                  {!streaming && message.id === lastAssistantId ? (
+                    <button
+                      type="button"
+                      className="atlas-redo"
+                      onClick={() => onRegenerate(message.id)}
+                    >
+                      重新生成
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           </article>
         );
       })}
+
+      {/* 📌 **AI 还没开口时的占位** —— 气泡建出来之前，界面不能只剩用户那句话 */}
+      {awaitingReply ? (
+        <article className="atlas-row-ai">
+          <div className="atlas-avatar" aria-hidden>
+            A
+          </div>
+          <div className="atlas-ai-body">
+            <TypingDots />
+          </div>
+        </article>
+      ) : null}
     </div>
   );
 }

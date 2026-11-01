@@ -894,6 +894,52 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
   }
 }
 
+/* ── 「正在生成」的三个点（见 [12-b B11](../docs/12-b-需求-对话与编排.md)） ── */
+
+.atlas-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 1.7em;
+}
+
+.atlas-typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--atlas-muted);
+  animation: atlas-typing 1.2s ease-in-out infinite;
+}
+
+.atlas-typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.atlas-typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes atlas-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+/* 📌 **有人嫌晃就别晃** —— 动画停掉，形状还在（不至于看着像卡住） */
+@media (prefers-reduced-motion: reduce) {
+  .atlas-typing-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
 /* ── 工具卡片与待确认卡片（见 [12-b B7](../docs/12-b-需求-对话与编排.md)） ── */
 
 .atlas-tool {
