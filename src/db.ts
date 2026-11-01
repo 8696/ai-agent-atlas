@@ -5,6 +5,12 @@ import { CostLog, costLogAttributes } from './models/cost-log.model.js';
 import { Message, messageAttributes } from './models/message.model.js';
 import { Session, sessionAttributes } from './models/session.model.js';
 import { ToolCallLog, toolCallLogAttributes } from './models/tool-call-log.model.js';
+import {
+  TurnLog,
+  TurnLogEvent,
+  turnLogAttributes,
+  turnLogEventAttributes,
+} from './models/turn-log.model.js';
 
 /**
  * 业务库连接（SQLite）。
@@ -54,6 +60,17 @@ AuditLog.initialize(auditLogAttributes, {
 CostLog.initialize(costLogAttributes, {
   sequelize,
   tableName: 'cost_logs',
+  timestamps: false,
+});
+// 📌 **会话全链路日志**（见 [12-e E7](./docs/12-e-需求-观测安全与验收.md)）
+TurnLog.initialize(turnLogAttributes, {
+  sequelize,
+  tableName: 'session_turn_logs',
+  timestamps: false,
+});
+TurnLogEvent.initialize(turnLogEventAttributes, {
+  sequelize,
+  tableName: 'session_turn_log_events',
   timestamps: false,
 });
 

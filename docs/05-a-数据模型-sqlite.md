@@ -235,6 +235,44 @@
 | `details`     | TEXT     | JSON（脱敏后）                                                         |
 | `created_at`  | DATETIME |                                                                        |
 
+### 会话全链路日志（`session_turn_logs` + `session_turn_log_events`）
+
+> **一个会话一份日志** —— 从用户发起，到上下文装配、模型请求与响应、
+> 工具判定与执行、记忆与技能的变化（见 [12-e E7](./12-e-需求-观测安全与验收.md)）。
+> ⚠️ **payload 里的密钥要打码后再入库**（`lib/security/mask.ts`）。
+
+**`session_turn_logs`（一轮一行）**
+
+| 字段          | 类型    | 说明                                                |
+| ------------- | ------- | --------------------------------------------------- |
+| `id`          | TEXT PK | **= 这一轮的 assistant 消息 id**（工具循环算同一轮） |
+| `session_id`  | TEXT    | 外键 → `sessions.id`                                |
+| `message_id`  | TEXT    | 同上（冗余一份，便于对账）                          |
+| `status`      | TEXT    | `running` / `finished` / `failed`                  |
+| `model`       | TEXT    | 这一轮用的模型                                      |
+| `started_at`  | DATETIME|                                                     |
+| `ended_at`    | DATETIME|                                                     |
+
+**`session_turn_log_events`（一个事件一行）**
+
+| 字段          | 类型    | 说明                                             |
+| ------------- | ------- | ------------------------------------------------ |
+| `id`          | TEXT PK |                                                  |
+| `turn_id`     | TEXT    | 外键 → `session_turn_logs.id`                    |
+| `session_id`  | TEXT    | 冗余一份（查一个会话的日志不用 join）            |
+| `seq`         | INTEGER | **顺序号** —— 全局单调递增（排序靠它）           |
+| `type`        | TEXT    | `llm.request` / `tool.execute` / …              |
+| `event_key`   | TEXT    | **幂等键** —— 与 `turn_id` 组成唯一索引          |
+| `title`       | TEXT    | 一行摘要（给人看的）                             |
+| `payload`     | TEXT    | JSON（**脱敏后**）                              |
+| `created_at`  | DATETIME|                                                  |
+
+> ⚠️ **`seq` 以毫秒时间戳打底** —— 进程重启后计数器会归零，
+> 但时间戳不会 → 重启后写的事件仍然排在旧事件后面。
+> ⚠️ **`event_key` 保证幂等** —— 图节点在恢复时会重跑一遍，
+> 同一个事件**重写**而不是重一行。
+> ⚠️ **删会话时级联删**（`services/session.ts` 的 `deleteSession`）。
+
 ## 5.2 表关系
 
 ```
@@ -245,6 +283,7 @@ users 1───n sessions 1───n messages
               ├──n messages
               ├──n tool_call_logs
               ├──n cost_logs
+              ├──n session_turn_logs ──1──n session_turn_log_events
               └──n messages_fts / memory_fts（FTS5 虚表，非关系表）
 
 audit_logs

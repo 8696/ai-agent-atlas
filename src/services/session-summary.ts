@@ -11,6 +11,7 @@ import { createChatModel } from './model.js';
 import { resolveUtilityModel } from './model-utility.js';
 import { recordUsage, usageOf } from './cost.js';
 import { messageText } from './chat-messages.js';
+import { logUtilityCall, type UtilityTrace } from './turn-log/emit.js';
 import { readTextFile } from './prompt.js';
 
 /**
@@ -172,7 +173,7 @@ function summaryPrompt(): string {
 export async function compressSession(
   sessionId: string,
   messages: BaseMessage[],
-  options: { manual?: boolean } = {},
+  options: { manual?: boolean; trace?: UtilityTrace } = {},
 ): Promise<{ ok: boolean; message: string; summary?: string; folded?: number }> {
   const cut = options.manual
     ? manualCutIndex(messages)
@@ -230,6 +231,21 @@ export async function compressSession(
     // 📌 **摘要的花费单独记一条**（`usage_scope='summary'`）——
     //    它也是模型调用，混进对话账里就看不出「摘要花了多少」
     const meta = usageOf(reply);
+
+    // 📌 **辅助模型调用进日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    logUtilityCall(options.trace ?? {}, {
+      purpose: '会话摘要压缩',
+      model: model.name,
+      input: transcript,
+      output: summary,
+      usage: {
+        inputTokens: meta.inputTokens,
+        outputTokens: meta.outputTokens,
+        reasoningTokens: meta.reasoningTokens,
+        cachedTokens: meta.cachedTokens,
+      },
+    });
+
     if (meta.inputTokens > 0 || meta.outputTokens > 0) {
       void recordUsage({
         sessionId,
@@ -316,7 +332,7 @@ function truncateOldest(messages: BaseMessage[], budget: number): BaseMessage[] 
 export async function prepareSessionContext(
   sessionId: string,
   messages: BaseMessage[],
-  options: { manual?: boolean } = {},
+  options: { manual?: boolean; trace?: UtilityTrace } = {},
 ): Promise<{ messages: BaseMessage[]; summary: string; compressed: boolean }> {
   let state = await loadSummary(sessionId);
 
@@ -329,14 +345,20 @@ export async function prepareSessionContext(
 
   if (options.manual) {
     // 📌 **手动压缩忽略 token 阈值** —— 立即把当前历史折成摘要
-    const result = await compressSession(sessionId, trimmed, { manual: true });
+    const result = await compressSession(sessionId, trimmed, {
+      manual: true,
+      ...(options.trace ? { trace: options.trace } : {}),
+    });
     if (result.ok && result.summary) {
       state = await loadSummary(sessionId);
       trimmed = trimByBoundary(trimmed, state);
       compressed = (result.folded ?? 0) > 0;
     }
   } else if (overBudget && config.SUMMARY_ENABLED) {
-    const result = await compressSession(sessionId, trimmed, { manual: false });
+    const result = await compressSession(sessionId, trimmed, {
+      manual: false,
+      ...(options.trace ? { trace: options.trace } : {}),
+    });
     if (result.ok && result.summary) {
       state = await loadSummary(sessionId);
       trimmed = trimByBoundary(trimmed, state);

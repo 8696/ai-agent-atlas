@@ -7,6 +7,7 @@ import { buildMemorySection } from '../../services/memory/inject.js';
 import { buildRetrievalSection } from '../../services/search.js';
 import { prepareSessionContext } from '../../services/session-summary.js';
 import { buildSkillSection } from '../../skills/inject.js';
+import { logEvent, turnIdOf } from '../../services/turn-log/emit.js';
 import type { AtlasStateUpdate } from '../state.js';
 
 /**
@@ -38,8 +39,15 @@ function lastUserText(messages: BaseMessage[]): string {
 export async function prepareNode(state: {
   turnMessages: BaseMessage[];
   sessionId?: string | undefined;
+  messageId?: string | undefined;
+  logTurnId?: string | undefined;
   isolated?: boolean | undefined;
 }): Promise<AtlasStateUpdate> {
+  // 📌 **埋点上下文** —— 「这一轮是哪个」（辅助模型调用要知道往哪记）
+  const trace = state.sessionId
+    ? { turnId: turnIdOf(state), sessionId: state.sessionId }
+    : undefined;
+
   // ── 摘要与裁剪 ──
   let messages = state.turnMessages;
   let summary = '';
@@ -47,7 +55,9 @@ export async function prepareNode(state: {
   //    （见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
   if (state.sessionId && !state.isolated) {
     try {
-      const context = await prepareSessionContext(state.sessionId, state.turnMessages);
+      const context = await prepareSessionContext(state.sessionId, state.turnMessages, {
+        ...(trace ? { trace } : {}),
+      });
       messages = context.messages;
       summary = context.summary;
     } catch (err) {
@@ -75,7 +85,7 @@ export async function prepareNode(state: {
   //    （见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
   if (!state.isolated) {
     try {
-      retrieval = await buildRetrievalSection(query);
+      retrieval = await buildRetrievalSection(query, trace ?? undefined);
     } catch (err) {
       logger.warn({ err }, '跨会话检索失败 —— 跳过这一段');
     }
@@ -87,6 +97,28 @@ export async function prepareNode(state: {
     skills = await buildSkillSection(query);
   } catch (err) {
     logger.warn({ err }, '技能匹配失败 —— 跳过这一段');
+  }
+
+  // 📌 **上下文装配记进会话日志**（**四段各是什么、原文多少**）
+  //    —— 这是「它怎么知道这件事」的唯一线索
+  //    （见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+  const turnId = turnIdOf(state);
+  if (state.sessionId && turnId) {
+    logEvent({
+      turnId,
+      sessionId: state.sessionId,
+      type: 'context.prepared',
+      eventKey: 'context.prepared',
+      title: '上下文装配',
+      payload: {
+        summary,
+        memories,
+        retrieval,
+        skills,
+        messageCount: messages.length,
+        historyChars: messages.reduce((sum, message) => sum + messageText(message).length, 0),
+      },
+    });
   }
 
   return {

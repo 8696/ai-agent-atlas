@@ -30,6 +30,9 @@ function toUiMessage(message: StoredMessage): UIMessage {
       message.role === 'assistant' ? 'assistant' : message.role === 'system' ? 'system' : 'user',
     // ⚠️ **落库的 part 直接回灌** —— 结构与推给前端时一致（见 [05-a §5.1](../docs/05-a-数据模型-sqlite.md)）
     parts: message.parts as UIMessage['parts'],
+    // 📌 **带上「这一轮答完了没有」** —— 刷新后靠它标出「答到一半」
+    //    （见 [12-b B13](../../docs/12-b-需求-对话与编排.md)）
+    ...(message.metadata ? { metadata: message.metadata } : {}),
   };
 }
 

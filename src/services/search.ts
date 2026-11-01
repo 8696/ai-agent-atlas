@@ -5,6 +5,7 @@ import { createChatModel } from './model.js';
 import { resolveUtilityModel } from './model-utility.js';
 import { recordUsage, usageOf } from './cost.js';
 import { probeFts, searchMemory, searchMessages, ensureFtsTables } from '../lib/fts.js';
+import { logUtilityCall, type UtilityTrace } from './turn-log/emit.js';
 import { MEMORY_FILES } from './memory/types.js';
 import { readMemory, ensureMemoryIndexFresh } from './memory/store.js';
 
@@ -160,7 +161,11 @@ export async function searchAll(
  *
  * ⚠️ **没命中就不调模型** —— 零命中时没有任何理由花钱。
  */
-export async function summarizeHits(query: string, hits: SearchHit[]): Promise<string> {
+export async function summarizeHits(
+  query: string,
+  hits: SearchHit[],
+  trace?: UtilityTrace,
+): Promise<string> {
   if (hits.length === 0) return '';
   const model = resolveUtilityModel();
   if (!model) return '';
@@ -198,6 +203,20 @@ export async function summarizeHits(query: string, hits: SearchHit[]): Promise<s
       });
     }
 
+    // 📌 **辅助模型调用进日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    logUtilityCall(trace ?? {}, {
+      purpose: '跨会话检索摘要',
+      model: model.name,
+      input: `用户的问题：${query}\n\n检索到的片段：\n${lines.join('\n')}`,
+      output: text.trim(),
+      usage: {
+        inputTokens: meta.inputTokens,
+        outputTokens: meta.outputTokens,
+        reasoningTokens: meta.reasoningTokens,
+        cachedTokens: meta.cachedTokens,
+      },
+    });
+
     return text.trim();
   } catch (err) {
     logger.warn({ err }, '检索结果摘要失败 —— 跳过这一段');
@@ -211,12 +230,15 @@ export async function summarizeHits(query: string, hits: SearchHit[]): Promise<s
  * 📌 **排在记忆段后面** —— 记忆是「偏好」，检索是「当时的事实」。
  * ⚠️ **检索失败不打断对话** —— 拿不到就当没有。
  */
-export async function buildRetrievalSection(query: string): Promise<string> {
+export async function buildRetrievalSection(
+  query: string,
+  trace?: UtilityTrace,
+): Promise<string> {
   if (!query.trim()) return '';
   const { hits, degraded } = await searchAll(query);
   if (hits.length === 0) return '';
 
-  const summary = await summarizeHits(query, hits);
+  const summary = await summarizeHits(query, hits, trace);
   if (!summary) return '';
 
   const label = degraded ? '历史检索结果（**全文索引不可用，以下按时间倒序**）' : '历史检索结果';

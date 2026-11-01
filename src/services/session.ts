@@ -223,10 +223,11 @@ async function tableExists(table: string): Promise<boolean> {
 /**
  * 删会话 —— **级联清干净，不留孤儿行**。
  *
- * ⚠️ **`tool_call_logs` / `graph_checkpoints` 是「表在就清」**：
- * 那两张表分别由工具流水（[C6](../docs/12-c-需求-工具技能与扩展.md)）与
- * 检查点（[B6](../docs/12-b-需求-对话与编排.md)）两条需求建 —— 现在还不存在，
- * 但**级联逻辑先写好**，等它们建了不用再改。
+ * ⚠️ **工具流水 / 检查点 / 轮次日志是「表在就清」**：
+ * 那三张表分别由工具流水（[C6](../docs/12-c-需求-工具技能与扩展.md)）、
+ * 检查点（[B6](../docs/12-b-需求-对话与编排.md)）与
+ * 会话全链路日志（[E7](../docs/12-e-需求-观测安全与验收.md)）建 ——
+ * **级联逻辑先写好**，表还没建时也不报错。
  */
 export async function deleteSession(id: string): Promise<boolean> {
   const session = await findSession(id);
@@ -240,6 +241,9 @@ export async function deleteSession(id: string): Promise<boolean> {
   const hasToolLogs = await tableExists('tool_call_logs');
   const hasCheckpoints = await tableExists('graph_checkpoints');
   const hasCheckpointWrites = await tableExists('graph_checkpoint_writes');
+  // 📌 **会话全链路日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  const hasTurnLogs = await tableExists('session_turn_logs');
+  const hasTurnLogEvents = await tableExists('session_turn_log_events');
 
   await sequelize.transaction(async (transaction) => {
     await Message.destroy({ where: { session_id: id }, transaction });
@@ -259,6 +263,21 @@ export async function deleteSession(id: string): Promise<boolean> {
     }
     if (hasCheckpoints) {
       await sequelize.query('DELETE FROM graph_checkpoints WHERE thread_id = :id', {
+        replacements: { id },
+        transaction,
+      });
+    }
+
+    // 📌 **会话全链路日志跟着一起删** —— 日志是会话的一部分
+    //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    if (hasTurnLogEvents) {
+      await sequelize.query('DELETE FROM session_turn_log_events WHERE session_id = :id', {
+        replacements: { id },
+        transaction,
+      });
+    }
+    if (hasTurnLogs) {
+      await sequelize.query('DELETE FROM session_turn_logs WHERE session_id = :id', {
         replacements: { id },
         transaction,
       });

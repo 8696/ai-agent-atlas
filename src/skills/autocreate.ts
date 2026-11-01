@@ -8,6 +8,7 @@ import { createChatModel } from '../services/model.js';
 import { resolveUtilityModel } from '../services/model-utility.js';
 import { recordUsage, usageOf } from '../services/cost.js';
 import { recordToolCall } from '../services/tool-log.js';
+import { logEvent, logUtilityCall } from '../services/turn-log/emit.js';
 import { readTextFile } from '../services/prompt.js';
 import { toLangChainTools } from '../tools/registry.js';
 import { createSkill, getSkill, updateSkill } from './store.js';
@@ -118,6 +119,8 @@ export async function runSkillAutocreate(input: {
   assistantText: string;
   toolCallCount: number;
   turnId?: string | undefined;
+  /** 会话 id（**日志用**） */
+  sessionId?: string | undefined;
 }): Promise<AutocreateResult> {
   const none = (note: string): AutocreateResult => ({ created: null, updated: null, note });
 
@@ -169,6 +172,26 @@ export async function runSkillAutocreate(input: {
 
   // 📌 **这次调用的花费单独记一条**（`usage_scope='skill'`）
   const meta = usageOf(reply);
+
+  // 📌 **辅助模型调用进日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  logUtilityCall(
+    {
+      ...(input.turnId ? { turnId: input.turnId } : {}),
+      ...(input.sessionId ? { sessionId: input.sessionId } : {}),
+    },
+    {
+      purpose: '技能沉淀判定',
+      model: model.name,
+      input: `用户：${input.userText}\n助手：${input.assistantText}`,
+      output: toolCallsOf(reply),
+      usage: {
+        inputTokens: meta.inputTokens,
+        outputTokens: meta.outputTokens,
+        reasoningTokens: meta.reasoningTokens,
+        cachedTokens: meta.cachedTokens,
+      },
+    },
+  );
   if (meta.inputTokens > 0 || meta.outputTokens > 0) {
     void recordUsage({
       sessionId: null,
@@ -220,6 +243,15 @@ export async function runSkillAutocreate(input: {
       requiresConfirmation: false,
     });
     logger.info({ name }, '自动沉淀了一个技能');
+    // 📌 **沉淀进会话日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    logEvent({
+      turnId: input.turnId ?? '',
+      sessionId: input.sessionId ?? '',
+      type: 'skill.autocreated',
+      eventKey: 'skill.autocreated',
+      title: `沉淀了新技能「${name}」`,
+      payload: { op: 'create', name, description },
+    });
     return { created: name, updated: null, note: '已创建' };
   }
 
@@ -254,6 +286,15 @@ export async function runSkillAutocreate(input: {
       requiresConfirmation: false,
     });
     logger.info({ name }, '自动更新了一个技能');
+    // 📌 **沉淀进会话日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    logEvent({
+      turnId: input.turnId ?? '',
+      sessionId: input.sessionId ?? '',
+      type: 'skill.autocreated',
+      eventKey: 'skill.autocreated',
+      title: `更新了技能「${name}」`,
+      payload: { op: 'update', name },
+    });
     return { created: null, updated: name, note: '已更新' };
   }
 

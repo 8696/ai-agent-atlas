@@ -11,6 +11,7 @@ import { getToolRegistry, type ToolRegistry } from '../tools/registry.js';
 import { mcpPolicyLookup } from '../tools/mcp/manager.js';
 import type { ToolDefinition } from '../tools/types.js';
 import { recordToolCall } from '../services/tool-log.js';
+import { logEvent } from '../services/turn-log/emit.js';
 import type { AssembledToolCall } from './tool-calls.js';
 
 /**
@@ -107,6 +108,13 @@ export interface RunToolCallOptions {
   sessionId?: string | undefined;
   /** 发起这次调用的 assistant 消息 id */
   messageId?: string | undefined;
+  /**
+   * 📌 **日志用的轮次 id**（**子代理的稳定 id** —— 没有就用 `messageId`）。
+   *
+   * ⚠️ **父图恢复时整个节点会重跑** —— 子代理的 `messageId` 是随机的，
+   *    用它会让日志落进一个「不存在的轮次」（见 `agent/state.ts` 的 `logTurnId`）。
+   */
+  logTurnId?: string | undefined;
   /** 客户端断开时 abort */
   signal?: AbortSignal | undefined;
   /** 已被用户拒绝过的调用（**指纹集合**） */
@@ -158,6 +166,26 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
   const fingerprint = fingerprintOf(call);
   const emit = options.emit;
 
+  // 📌 **日志用的轮次 id** —— 主代理用 `messageId`，子代理用稳定的 `logTurnId`
+  const logTurnId = options.logTurnId || options.messageId || '';
+  /** 记一条事件（**没有会话就不记**） */
+  const trace = (
+    type: 'tool.decision' | 'confirm.request' | 'confirm.decision' | 'tool.execute',
+    eventKey: string,
+    title: string,
+    payload: unknown,
+  ): void => {
+    if (!options.sessionId || !logTurnId) return;
+    logEvent({
+      turnId: logTurnId,
+      sessionId: options.sessionId,
+      type,
+      eventKey,
+      title,
+      payload,
+    });
+  };
+
   const base: ToolCard = {
     toolCallId: call.id,
     toolName: call.name,
@@ -183,6 +211,12 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       error: message,
     });
     options.emit?.({ ...base, status: 'error', error: message });
+    trace('tool.decision', `tool.decision:${call.id}`, `工具「${call.name}」不存在`, {
+      tool: call.name,
+      decision: 'not-found',
+      args: call.args,
+      error: message,
+    });
     return {
       content: message,
       card: { ...base, status: 'error', error: message },
@@ -237,6 +271,16 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
 
   if (decision.decision === 'blocked' || decision.decision === 'reject') {
     const message = `工具「${tool.name}」被安全策略拦截：${decision.reason}`;
+    trace('tool.decision', `tool.decision:${call.id}`, `工具「${tool.name}」被拦截`, {
+      tool: tool.name,
+      source: tool.source,
+      sensitivity: tool.sensitivity,
+      effectiveSensitivity,
+      decision: decision.decision,
+      reason: decision.reason,
+      fingerprint,
+      args: call.args,
+    });
     await recordToolCall({
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       ...(options.messageId ? { messageId: options.messageId } : {}),
@@ -257,6 +301,25 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       requiresConfirmation: false,
     });
   }
+
+  // 📌 **权限判定记进会话日志**（**为什么它能调 / 要不要人确认**）
+  //    —— 「它为什么突然要确认」只能靠这条查
+  //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  trace(
+    'tool.decision',
+    `tool.decision:${call.id}`,
+    `工具「${tool.name}」判定：${decision.decision}`,
+    {
+      tool: tool.name,
+      source: tool.source,
+      sensitivity: tool.sensitivity,
+      effectiveSensitivity,
+      decision: decision.decision,
+      reason: decision.reason ?? null,
+      fingerprint,
+      args: call.args,
+    },
+  );
 
   // ── 人工确认闸 ──
   let requiresConfirmation = false;
@@ -295,10 +358,23 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       fingerprint,
     };
 
+    // 📌 **要人确认** —— 记进会话日志（「它在等什么」）
+    trace('confirm.request', `confirm.request:${call.id}`, `等待确认：${tool.name}`, {
+      tool: tool.name,
+      args: call.args,
+      risk: riskOf(tool, effectiveSensitivity),
+      fingerprint,
+    });
+
     // ⚠️ **这里挂起** —— 图状态落盘，进程重启后待确认仍在
     const resume = interrupt<typeof payload, ToolResumeValue | undefined>(payload);
 
     if (!resume || resume.approved !== true) {
+      trace('confirm.decision', `confirm.decision:${call.id}`, `用户拒绝了 ${tool.name}`, {
+        tool: tool.name,
+        approved: false,
+        fingerprint: resume?.fingerprint ?? null,
+      });
       const message = '用户拒绝了这个操作。';
       await recordToolCall({
         ...(options.sessionId ? { sessionId: options.sessionId } : {}),
@@ -332,6 +408,14 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
     }
     // 📌 **「本轮剩下的都批准」** —— 记下来，后面的危险工具就不再逐个问
     batchApproved = resume.approveAll === true;
+
+    // 📌 **用户批准了** —— 记进会话日志（「这次是谁放行的」）
+    trace('confirm.decision', `confirm.decision:${call.id}`, `用户批准了 ${tool.name}`, {
+      tool: tool.name,
+      approved: true,
+      approveAll: batchApproved,
+      fingerprint: resume.fingerprint ?? null,
+    });
   }
 
   // ── 真正执行 ──
@@ -375,6 +459,13 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       sessionId: options.sessionId,
       toolCallId: call.id,
       error: message,
+    });
+    trace('tool.execute', `tool.execute:${call.id}`, `工具「${tool.name}」执行失败`, {
+      tool: tool.name,
+      status: 'error',
+      args: call.args,
+      error: message,
+      durationMs: duration,
     });
     return finish({
       content: `工具「${tool.name}」执行失败：${message}。可以换个思路继续。`,
@@ -431,6 +522,21 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       toolCallId: call.id,
     });
   }
+
+  // 📌 **工具执行记进会话日志**（**入参 / 出参 / 耗时**）
+  //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  trace('tool.execute', `tool.execute:${call.id}`, `工具「${tool.name}」执行完毕`, {
+    tool: tool.name,
+    source: tool.source,
+    status: ok ? 'success' : 'error',
+    args: call.args,
+    output: clipped.text,
+    truncated: clipped.truncated,
+    originalLength: clipped.originalLength,
+    durationMs: duration,
+    requiresConfirmation,
+    error: result.error ?? null,
+  });
 
   return finish({
     // ⚠️ **出参也要打码** —— 工具读到的密钥不能进图状态

@@ -40,6 +40,13 @@ export interface MessageView {
   parts: UiPart[];
   favorite: boolean;
   createdAt: string | null;
+  /**
+   * 消息元数据（`model` / `complete` / `interrupted` …）。
+   *
+   * 📌 **`complete: false` = 这一次没答完** —— 流被中断（刷新 / 停止 / 崩溃）
+   * 时落下来的部分内容，界面上要标出来（见 [12-b B13](../docs/12-b-需求-对话与编排.md)）。
+   */
+  metadata: Record<string, unknown> | null;
 }
 
 /** JSON 解析失败时返回兜底值（**不让一行坏数据把整个会话读挂**） */
@@ -57,8 +64,18 @@ function textOf(parts: Array<{ type: string; text?: string | undefined }>): stri
   return extractText(parts);
 }
 
-/** 两边说的是不是同一句话（**对账的判据**：角色 + 正文） */
+/**
+ * 两边说的是不是同一条消息。
+ *
+ * 📌 **id 对得上就是同一条** —— 内容可能因为「流式落库」而落后
+ *    （库里存的是上一次快照，客户端手里是最新的一段）。
+ *    ⚠️ **别因为内容不一致就把它当成「多出来的行」删掉** ——
+ *    那会把刚写进去的回答删掉（见 [12-b B13](../docs/12-b-需求-对话与编排.md)）。
+ *    没有 id 时才退回比内容。
+ */
 function sameContent(row: Message, incoming: IncomingMessage): boolean {
+  const id = incoming.id?.trim();
+  if (id && row.id === id) return true;
   return row.role === incoming.role && row.content === textOf(incoming.parts);
 }
 
@@ -74,7 +91,6 @@ async function insertRow(sessionId: string, incoming: IncomingMessage): Promise<
     tool_calls: null,
     tool_results: null,
     attachments: null,
-    metadata: null,
     updated_at: now,
   };
 
@@ -84,6 +100,9 @@ async function insertRow(sessionId: string, incoming: IncomingMessage): Promise<
   const existing = await Message.findByPk(id);
   if (existing) {
     existing.set(values);
+    // ⚠️ **别把 metadata 抹成 null** —— 库里存着「这一轮没答完 / 模型名」这类
+    //    服务端才知道的标记（见 [12-b B13](../docs/12-b-需求-对话与编排.md)）；
+    //    「对账」重插这条行时不能把它清掉。
     await existing.save();
     return;
   }
@@ -91,6 +110,7 @@ async function insertRow(sessionId: string, incoming: IncomingMessage): Promise<
   await Message.create({
     id,
     ...values,
+    metadata: null,
     favorite: 0,
     created_at: now,
   });
@@ -115,6 +135,18 @@ export async function syncMessages(sessionId: string, incoming: IncomingMessage[
     common < incoming.length &&
     sameContent(rows[common] as Message, incoming[common] as IncomingMessage)
   ) {
+    // 📌 **同一条消息但内容更长（客户端那份更全）→ 用更全的那份** ——
+    //    流式落库时库里是快照，客户端手里是最新的一段；
+    //    两边都是同一条流的**前缀**，取长的那个不会出错。
+    const row = rows[common] as Message;
+    const incomingMessage = incoming[common] as IncomingMessage;
+    const incomingContent = textOf(incomingMessage.parts);
+    if (incomingContent.length > row.content.length) {
+      row.content = incomingContent;
+      row.parts = JSON.stringify(incomingMessage.parts);
+      row.updated_at = utcNow();
+      await row.save();
+    }
     common += 1;
   }
 
@@ -151,10 +183,20 @@ export async function appendUserMessage(sessionId: string, content: string): Pro
  *
  * 📌 **同 id 就更新** —— 挂起时先落一笔（带待确认卡片），
  * 恢复后再落一次（带最终内容），两次是同一条消息，不会多出一条。
+ *
+ * @param createIfMissing **库里没有这行时要不要新建** ——
+ *   流式落过库的行传 `false`：**「重新生成」把旧行删掉后，
+ *   上一轮的收尾就不能再把它建回来**（否则会多出一条一样的回答）。
  */
 export async function appendAssistantMessage(
   sessionId: string,
-  input: { id: string; content: string; parts: UiPart[]; metadata?: Record<string, unknown> },
+  input: {
+    id: string;
+    content: string;
+    parts: UiPart[];
+    metadata?: Record<string, unknown> | undefined;
+    createIfMissing?: boolean | undefined;
+  },
 ): Promise<void> {
   const now = utcNow();
   const values = {
@@ -175,6 +217,9 @@ export async function appendAssistantMessage(
     await existing.save();
     return;
   }
+
+  // 📌 **不新建就到此为止** —— 这行被「重新生成」删掉了，别复活它
+  if (input.createIfMissing === false) return;
 
   await Message.create({
     id: input.id,
@@ -197,6 +242,7 @@ export async function listMessages(sessionId: string): Promise<MessageView[]> {
     parts: parseJson<UiPart[]>(row.parts, []),
     favorite: row.favorite === 1,
     createdAt: utcToIso(row.created_at),
+    metadata: parseJson<Record<string, unknown> | null>(row.metadata, null),
   }));
 }
 
@@ -217,6 +263,7 @@ export async function setMessageFavorite(
     parts: parseJson<UiPart[]>(row.parts, []),
     favorite: row.favorite === 1,
     createdAt: utcToIso(row.created_at),
+    metadata: parseJson<Record<string, unknown> | null>(row.metadata, null),
   };
 }
 

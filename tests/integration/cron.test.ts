@@ -89,6 +89,7 @@ const { addCronTask, loadCronTasks, updateCronTask } = await import('../../src/s
 const { tickCron } = await import('../../src/services/cron/scheduler');
 const { createSession } = await import('../../src/services/session');
 const { listMessages } = await import('../../src/services/message');
+const { readSessionLog } = await import('../../src/services/turn-log/store');
 const { FILES } = await import('../../src/config/paths');
 
 /** 一个假工具 */
@@ -171,6 +172,17 @@ describe('定时任务调度', () => {
     expect(messages.some((message) => message.content.includes('定时任务跑完了'))).toBe(true);
     // 📌 **用户那条也在**（任务指令本身）
     expect(messages.some((message) => message.role === 'user')).toBe(true);
+
+    // 📌 **定时任务也要进会话日志**（它不走网关 —— 不开一轮的话事件会成孤儿，
+    //    在日志里根本看不见，见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    const log = await readSessionLog(sessionId);
+    expect(log.turns.length).toBeGreaterThan(0);
+    const types = log.turns.flatMap((turn) => turn.events.map((event) => event.type));
+    expect(types).toContain('request.received');
+    expect(types).toContain('llm.request');
+    // ⚠️ **状态不能是「未知」** —— 「未知」= 有事件却没有轮次行（孤儿），
+    //    说明这条路径漏了「开一轮」
+    expect(log.turns.some((turn) => turn.status === 'unknown')).toBe(false);
   });
 
   it('⚠️ 触发时需要人工确认 → 跳过该步并记录，任务不挂死', async () => {

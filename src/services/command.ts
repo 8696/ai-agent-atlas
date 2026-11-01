@@ -22,6 +22,8 @@ import { buildContextReport, renderContextReport } from './context-report.js';
 import { describeCronTask, loadCronTasks } from './cron/store.js';
 import { listToolSummaries, renderToolReport } from './tool-report.js';
 import { exportSession } from './session-export.js';
+import { readSessionLog } from './turn-log/store.js';
+import { renderSessionLog } from './turn-log/render.js';
 import {
   createSession,
   findSession,
@@ -79,6 +81,11 @@ export const COMMANDS: CommandSpec[] = [
     name: 'context',
     usage: '/context [问题]',
     summary: '看这一轮给模型发了什么（上下文构成报告；带问题则算动态段）',
+  },
+  {
+    name: 'log',
+    usage: '/log',
+    summary: '看这个会话的全链路日志（上下文装配 · 模型请求 · 工具执行 · 记忆与技能）',
   },
   { name: 'thinking', usage: '/thinking on|off', summary: '思考模式开关（下一轮生效）' },
   { name: 'stop', usage: '/stop', summary: '停止当前流式输出' },
@@ -592,6 +599,17 @@ export async function runCommand(
         return {
           text: `已导出：${file}`,
           data: { command: 'export', path: file, format },
+          action: 'none',
+        };
+      }
+
+      case 'log': {
+        if (!sessionId) return { text: '当前没有会话 —— `/new` 开一个。', action: 'none' };
+        // 📌 **零 LLM 调用** —— 全是本地查库（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+        const log = await readSessionLog(sessionId);
+        return {
+          text: renderSessionLog(log),
+          data: { command: 'log', turns: log.turns.length },
           action: 'none',
         };
       }

@@ -301,6 +301,21 @@ export const AtlasState = Annotation.Root({
     reducer: (_current, update) => update ?? '',
     default: () => '',
   }),
+
+  /**
+   * ⚠️ **日志用的轮次 id**（**为空就用 `messageId`**）。
+   *
+   * 📌 **为什么另开一个** —— 子代理的 `messageId` 是随机的
+   *    （`subagent:<nanoid>`），而**父图恢复时整个节点会重跑**，
+   *    随机 id 会让子代理的日志落进一个「不存在的轮次」。
+   *    这里用工具调用 id 派生一个**稳定 id** —— 恢复后还是同一个。
+   *
+   * 📌 **只给子代理用** —— 主代理留空即可（`messageId` 本身就是稳定的）。
+   */
+  logTurnId: Annotation<string>({
+    reducer: (_current, update) => update ?? '',
+    default: () => '',
+  }),
 });
 
 /** 图状态的值类型 */

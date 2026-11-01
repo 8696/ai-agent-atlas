@@ -83,6 +83,14 @@ export interface StoredMessage {
   /** 消息级收藏 */
   favorite: boolean;
   createdAt: string | null;
+  /**
+   * 消息元数据（`model` / `complete` …）。
+   *
+   * 📌 **`complete === false` = 回答到一半就没了**（刷新 / 断开 / 崩了）——
+   *    界面上要标出来，别让人以为它答完了
+   *    （见 [12-b B13](../../docs/12-b-需求-对话与编排.md)）。
+   */
+  metadata?: Record<string, unknown> | null;
 }
 
 /** 列表响应 */
@@ -311,5 +319,55 @@ export async function confirmToolCall(
     },
     { timeout: 180_000 },
   );
+  return data;
+}
+
+/* ── 会话全链路日志（见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)） ─── */
+
+/** 日志里的一个事件 */
+export interface TurnLogEvent {
+  /** 顺序号 */
+  seq: number;
+  /** 事件类型（`llm.request` / `tool.execute` …） */
+  type: string;
+  /** 类型的中文名 */
+  label: string;
+  /** 一行摘要 */
+  title: string;
+  /** 详情（**已脱敏的 JSON**） */
+  payload: unknown;
+  /** 落库时间 */
+  createdAt: string;
+}
+
+/** 日志里的一轮 */
+export interface TurnLogTurn {
+  /** 这一轮的 id（= assistant 消息 id） */
+  id: string;
+  /** `running` / `finished` / `failed` */
+  status: string;
+  /** 用的模型 */
+  model: string | null;
+  startedAt: string;
+  endedAt: string | null;
+  /** 这一轮的事件（**按顺序**） */
+  events: TurnLogEvent[];
+}
+
+/** 一个会话的完整日志 */
+export interface SessionTurnLogResponse {
+  session: { id: string; title: string };
+  turns: TurnLogTurn[];
+}
+
+/**
+ * 拉一个会话的全链路日志。
+ *
+ * ⚠️ **超时给长一点** —— 一份日志可能有几十轮、上百个事件。
+ */
+export async function fetchSessionLog(id: string): Promise<SessionTurnLogResponse> {
+  const { data } = await api.get<SessionTurnLogResponse>(`/sessions/${id}/log`, {
+    timeout: 60_000,
+  });
   return data;
 }

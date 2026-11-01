@@ -12,6 +12,7 @@ import {
 } from '../services/session.js';
 import { listMessages, setMessageFavorite } from '../services/message.js';
 import { exportSession } from '../services/session-export.js';
+import { readSessionLog } from '../services/turn-log/store.js';
 
 /**
  * 会话网关 —— `/api/v1/sessions` · `/api/v1/messages/:id/favorite`
@@ -136,6 +137,21 @@ sessionRouter.get('/sessions/:id/export', async (ctx) => {
   ctx.set('Content-Type', result.mimeType);
   ctx.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`);
   ctx.body = result.content;
+});
+
+/**
+ * `GET /api/v1/sessions/:id/log` —— **这个会话的全链路日志**
+ * （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）。
+ *
+ * 📌 **一个会话一份日志** —— 按 `session_id` 把所有轮次与事件聚在一起。
+ */
+sessionRouter.get('/sessions/:id/log', async (ctx) => {
+  const id = pathParam(ctx.params.id, 'id');
+  const session = await getSessionView(id);
+  if (!session) {
+    throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+  }
+  ctx.body = { session: { id: session.id, title: session.title }, ...(await readSessionLog(id)) };
 });
 
 /**

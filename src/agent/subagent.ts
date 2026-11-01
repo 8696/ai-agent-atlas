@@ -10,6 +10,8 @@ import { truncateOutput } from '../tools/output.js';
 import type { ToolDefinition, ToolResult } from '../tools/types.js';
 import { getGraph } from './graph.js';
 import { Semaphore } from './subagent-pool.js';
+import { logEvent } from '../services/turn-log/emit.js';
+import { finishTurn, startTurn } from '../services/turn-log/store.js';
 
 /**
  * 子代理 —— **主 Agent 把子任务派给隔离上下文的子代理**
@@ -190,6 +192,11 @@ export async function runSubagent(options: {
   sessionId?: string | undefined;
   model?: string | undefined;
   signal?: AbortSignal | undefined;
+  /**
+   * 📌 **日志用的轮次 id**（**稳定** —— 父图恢复时整个节点会重跑，
+   *    用随机的 `messageId` 会让日志落进一个「不存在的轮次」）。
+   */
+  logTurnId?: string | undefined;
   /** ⚠️ **这一层是第几层**（1 = 子代理 · 2 = 孙代理） */
   depth?: number | undefined;
   /** 产出格式（`json` = 要一个 JSON 对象） */
@@ -209,12 +216,39 @@ export async function runSubagent(options: {
   // 📌 **子代理的消息 id 带前缀** —— 工具流水里能一眼看出
   //    「这几条是子代理跑的」（见 [12-c C6](./docs/12-c-需求-工具技能与扩展.md)）
   const messageId = `subagent:${nanoid()}`;
+  // 📌 **日志的轮次 id** —— 优先用稳定的 `logTurnId`（父图恢复后还是同一个）
+  const logTurnId = options.logTurnId || messageId;
+
+  // 📌 **子代理也进会话日志**（**它自己的那一轮**）
+  //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  if (options.sessionId) {
+    await startTurn({
+      turnId: logTurnId,
+      sessionId: options.sessionId,
+      ...(options.model ? { model: options.model } : {}),
+    });
+    logEvent({
+      turnId: logTurnId,
+      sessionId: options.sessionId,
+      type: 'request.received',
+      eventKey: 'request.received',
+      title: `派发子代理：${options.name}`,
+      payload: {
+        name: options.name,
+        task,
+        depth: options.depth ?? 1,
+        model: options.model ?? null,
+      },
+    });
+  }
 
   const stream = (await graph.stream(
     {
       turnMessages: [new HumanMessage(task)],
       sessionId: options.sessionId ?? '',
       messageId,
+      // 📌 **日志的轮次 id** —— 子代理的日志也挂在会话上
+      logTurnId,
       // ⚠️ **隔离** —— 子代理不加载主对话的历史与摘要
       isolated: true,
       // 📌 **子代理自己的步数上限**
@@ -274,6 +308,11 @@ export async function runSubagent(options: {
       // ⚠️ **解析不出来要如实说** —— 不能把一段散文当成结构化结果
       parseFailed = true;
     }
+  }
+
+  // 📌 **子代理这一轮收尾** —— 记进会话日志
+  if (options.sessionId) {
+    await finishTurn(logTurnId, 'finished');
   }
 
   return {
@@ -377,6 +416,8 @@ export const spawnSubagentTool: ToolDefinition = {
         task: input.task,
         name,
         threadId,
+        // 📌 **日志的轮次 id** —— 用工具调用 id 派生，**父图恢复后还是同一个**
+        ...(context.toolCallId ? { logTurnId: `subagent:${context.toolCallId}` } : {}),
         // 📌 **深度 +1** —— 这一层是子代理，它自己还能不能派由 `SUBAGENT_MAX_DEPTH` 判
         depth: depth + 1,
         ...(input.output ? { output: input.output } : {}),

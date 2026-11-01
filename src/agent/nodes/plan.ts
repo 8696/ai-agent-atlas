@@ -28,6 +28,8 @@ import { getToolRegistry, toLangChainTools } from '../../tools/registry.js';
 import { selectTools } from '../../tools/selection.js';
 import { assembleToolCalls } from '../tool-calls.js';
 import { messageText } from '../../services/chat-messages.js';
+import { describeMessages, logEvent, turnIdOf } from '../../services/turn-log/emit.js';
+import { describeToolDefs, describeToolCalls } from '../../services/turn-log/describe.js';
 import type { AtlasStateUpdate } from '../state.js';
 import type { UsageScope } from '../../models/cost-log.model.js';
 
@@ -91,6 +93,7 @@ export async function planNode(
     skills?: string | undefined;
     sessionId?: string | undefined;
     messageId?: string | undefined;
+    logTurnId?: string | undefined;
     isolated?: boolean | undefined;
     model?: string | undefined;
     usageScope?: UsageScope | undefined;
@@ -98,6 +101,8 @@ export async function planNode(
     depth?: number | undefined;
     /** ⚠️ **本轮已经用掉的 token** —— 判单轮上限 */
     turnTokens?: number | undefined;
+    /** ⚠️ **本轮已走的步数** —— 日志用它区分「同一轮里的第几次调模型」 */
+    steps?: number | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): Promise<AtlasStateUpdate> {
@@ -177,6 +182,39 @@ export async function planNode(
     ...state.messages,
   ];
 
+  // 📌 **这一轮的第几次调模型**（**日志的幂等键要用**）——
+  //    `steps` 在图状态里单调递增（每跑完一批工具 +1），
+  //    所以它能区分同一轮里的多次模型调用。
+  const llmCallIndex = state.steps ?? 0;
+  const logTurnId = turnIdOf(state);
+  const loggable = Boolean(state.sessionId && logTurnId);
+
+  // 📌 **模型请求记进会话日志**（**完整请求体**）
+  //    —— 「到底给模型发了什么」只能在这儿看
+  //    （见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+  if (loggable) {
+    logEvent({
+      turnId: logTurnId,
+      sessionId: state.sessionId as string,
+      type: 'llm.request',
+      eventKey: `llm.request:${llmCallIndex}`,
+      title: `第 ${llmCallIndex + 1} 次调模型`,
+      payload: {
+        model: model.name,
+        modelId: model.modelId,
+        baseUrl: model.baseUrl ?? null,
+        temperature: model.temperature,
+        maxTokens: model.maxTokens,
+        thinkingBudget,
+        cacheEnabled: config.LLM_PROMPT_CACHE,
+        tools: describeToolDefs(tools),
+        systemPrompt,
+        messages: describeMessages(messages),
+        injectionMatches: scan.matches,
+      },
+    });
+  }
+
   // 📌 **优先用网关登记的那份信号** —— LangGraph 组合出来的那个
   //    偶尔对不上（客户端断开时上游停不下来，白烧 token）；
   //    网关这份是**我们自己控制的**，一定准
@@ -211,6 +249,17 @@ export async function planNode(
         reason: reason.slice(0, 300),
         sessionId: state.sessionId,
       });
+      // 📌 **降级也记进会话日志** —— 「为什么答案突然变差了」就靠这条
+      if (loggable) {
+        logEvent({
+          turnId: logTurnId,
+          sessionId: state.sessionId as string,
+          type: 'model.fallback',
+          eventKey: `model.fallback:${llmCallIndex}:${from}->${to}`,
+          title: `模型策略变了：${from} → ${to}`,
+          payload: { from, to, reason },
+        });
+      }
     },
   });
 
@@ -222,6 +271,8 @@ export async function planNode(
   if (fallbackNotice) emit?.({ type: 'notice', text: fallbackNotice });
 
   let text = '';
+  // 📌 **思考文本也攒起来** —— 日志里要看得见「它想了什么」
+  let reasoningText = '';
   const toolCallChunks: Array<{ index?: number; id?: string; name?: string; args?: string }> = [];
   let usage = 0;
   let inputTokens = 0;
@@ -251,6 +302,7 @@ export async function planNode(
 
     const reasoning = readReasoningDelta(piece);
     if (reasoning) {
+      reasoningText += reasoning;
       emit?.({ type: 'reasoning-delta', delta: reasoning });
     }
 
@@ -328,6 +380,32 @@ export async function planNode(
     content: text,
     ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
   });
+
+  // 📌 **模型响应记进会话日志**（**完整响应体**）
+  //    —— 与 `llm.request` 一起构成「这一轮模型的完整往返」
+  //    （见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+  if (loggable) {
+    logEvent({
+      turnId: logTurnId,
+      sessionId: state.sessionId as string,
+      type: 'llm.response',
+      eventKey: `llm.response:${llmCallIndex}`,
+      title: `第 ${llmCallIndex + 1} 次模型响应`,
+      payload: {
+        model: usedModel.name,
+        text,
+        reasoning: reasoningText,
+        toolCalls: describeToolCalls(toolCalls),
+        usage: {
+          inputTokens,
+          outputTokens,
+          reasoningTokens,
+          cachedTokens,
+          totalTokens: inputTokens + outputTokens,
+        },
+      },
+    });
+  }
 
   return {
     messages: [aiMessage],

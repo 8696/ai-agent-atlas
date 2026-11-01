@@ -4,6 +4,7 @@ import type { TableColumnsType } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  FileTextOutlined,
   HistoryOutlined,
   SearchOutlined,
   StarFilled,
@@ -146,9 +147,19 @@ export function SessionsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 140,
+      width: 170,
       render: (_value, record) => (
         <Space size={4}>
+          {/* 📌 **看这个会话的全链路日志**（见 [12-e E7](../../../docs/12-e-需求-观测安全与验收.md)） */}
+          <Button
+            type="text"
+            size="small"
+            aria-label="查看日志"
+            icon={<FileTextOutlined />}
+            onClick={() => {
+              void navigate(`/sessions/${record.id}/log`);
+            }}
+          />
           <Button
             type="text"
             size="small"

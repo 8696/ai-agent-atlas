@@ -7,6 +7,8 @@ import { logger } from '../../logger.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendAssistantMessage, appendUserMessage } from '../message.js';
 import { createSession, findSession } from '../session.js';
+import { logEvent } from '../turn-log/emit.js';
+import { finishTurn, startTurn } from '../turn-log/store.js';
 import type { CronTask } from './store.js';
 
 /**
@@ -53,6 +55,24 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
   const messageId = nanoid();
   await appendUserMessage(sessionId, task.prompt);
 
+  // 📌 **定时任务也进会话日志**（见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+  //    ⚠️ **它不走网关** —— 网关那步「开一轮」在这里补上，
+  //    不开的话事件会成孤儿（有事件没有轮次 → 日志里看不见）
+  await startTurn({ turnId: messageId, sessionId });
+  logEvent({
+    turnId: messageId,
+    sessionId,
+    type: 'request.received',
+    eventKey: 'request.received',
+    title: `定时任务：${task.name}`,
+    payload: {
+      taskId: task.id,
+      task: task.name,
+      prompt: task.prompt,
+      autoApprove: task.autoApprove ?? [],
+    },
+  });
+
   let text = '';
   let interrupted = false;
 
@@ -95,6 +115,15 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
       status: 'error',
       error: message,
     });
+    await finishTurn(messageId, 'failed');
+    logEvent({
+      turnId: messageId,
+      sessionId,
+      type: 'turn.error',
+      eventKey: 'turn.error',
+      title: '定时任务失败',
+      payload: { error: message },
+    });
     return { ok: false, text: '', skipped: false, reason: message };
   }
 
@@ -115,6 +144,16 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
       status: 'skipped',
       reason,
     });
+    // 📌 **这一轮是「跳过」不是「完成」** —— 别让它一直挂在「进行中」
+    await finishTurn(messageId, 'failed');
+    logEvent({
+      turnId: messageId,
+      sessionId,
+      type: 'turn.error',
+      eventKey: 'turn.error',
+      title: '定时任务跳过',
+      payload: { reason },
+    });
     return { ok: false, text: '', skipped: true, reason };
   }
 
@@ -129,6 +168,9 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
     status: 'success',
     sessionId,
   });
+
+  // 📌 **这一轮跑完了** —— 图的 `answer` 节点也会写一次（幂等）
+  await finishTurn(messageId, 'finished');
 
   return { ok: true, text, skipped: false, reason: '' };
 }

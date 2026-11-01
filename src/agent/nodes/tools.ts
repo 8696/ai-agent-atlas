@@ -33,6 +33,8 @@ interface ToolNodeState {
   steps: number;
   sessionId?: string | undefined;
   messageId?: string | undefined;
+  /** 📌 **日志用的轮次 id**（子代理的稳定 id） */
+  logTurnId?: string | undefined;
   autoApprove?: string[] | undefined;
   /** 注入检测命中的特征（**空 = 没命中**） */
   injectionMatches?: string[] | undefined;
@@ -172,6 +174,7 @@ export async function toolsNode(
           call: item,
           ...(state.sessionId ? { sessionId: state.sessionId } : {}),
           ...(state.messageId ? { messageId: state.messageId } : {}),
+          ...(state.logTurnId ? { logTurnId: state.logTurnId } : {}),
           ...(runnableConfig.signal ? { signal: runnableConfig.signal } : {}),
           rejected: new Set(state.rejectedToolCalls),
           autoApprove: new Set(state.autoApprove ?? []),
@@ -214,6 +217,7 @@ export async function toolsNode(
     call,
     ...(state.sessionId ? { sessionId: state.sessionId } : {}),
     ...(state.messageId ? { messageId: state.messageId } : {}),
+    ...(state.logTurnId ? { logTurnId: state.logTurnId } : {}),
     ...(runnableConfig.signal ? { signal: runnableConfig.signal } : {}),
     rejected: new Set(state.rejectedToolCalls),
     // 📌 **显式放行的工具**（无人值守场景 —— 定时任务）

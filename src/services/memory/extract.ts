@@ -7,6 +7,7 @@ import { writeAudit } from '../../lib/audit.js';
 import { createChatModel } from '../model.js';
 import { resolveUtilityModel } from '../model-utility.js';
 import { recordUsage, usageOf } from '../cost.js';
+import { logEvent, logUtilityCall } from '../turn-log/emit.js';
 import { readTextFile } from '../prompt.js';
 import { scanMemoryWrite } from './scan.js';
 import { recentManualMemoryWrite } from './manual-write.js';
@@ -180,6 +181,8 @@ export async function runMemoryExtraction(input: {
   userText: string;
   assistantText: string;
   sessionId?: string | undefined;
+  /** 📌 **这一轮的日志 id**（**用来把抽取结果记进会话日志**） */
+  turnId?: string | undefined;
 }): Promise<ExtractionResult> {
   const result: ExtractionResult = { applied: 0, rejected: 0, notes: [] };
   if (!config.MEMORY_ENABLED) return result;
@@ -225,6 +228,23 @@ export async function runMemoryExtraction(input: {
 
     // 📌 **抽取的花费单独记一条**（`usage_scope='memory'`）
     const meta = usageOf(reply);
+
+    // 📌 **辅助模型调用进日志**（见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+    logUtilityCall(
+      { ...(input.turnId ? { turnId: input.turnId } : {}), ...(input.sessionId ? { sessionId: input.sessionId } : {}) },
+      {
+        purpose: '记忆抽取',
+        model: model.name,
+        input: `用户：${input.userText}\n助手：${input.assistantText}`,
+        output: raw,
+        usage: {
+          inputTokens: meta.inputTokens,
+          outputTokens: meta.outputTokens,
+          reasoningTokens: meta.reasoningTokens,
+          cachedTokens: meta.cachedTokens,
+        },
+      },
+    );
     if (meta.inputTokens > 0 || meta.outputTokens > 0) {
       void recordUsage({
         sessionId: null,
@@ -291,6 +311,24 @@ export async function runMemoryExtraction(input: {
 
   if (result.applied > 0) {
     logger.info({ applied: result.applied, rejected: result.rejected }, '记忆已更新');
+  }
+
+  // 📌 **抽取结果记进会话日志**（**自动抽取不走工具层，不记就看不见**）
+  //    （见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+  if (input.sessionId && input.turnId) {
+    logEvent({
+      turnId: input.turnId,
+      sessionId: input.sessionId,
+      type: 'memory.extracted',
+      eventKey: 'memory.extracted',
+      title: `记忆抽取：应用 ${result.applied} 条`,
+      payload: {
+        applied: result.applied,
+        rejected: result.rejected,
+        notes: result.notes,
+        ops: ops.map((op) => ({ op: op.op, file: op.file, name: op.name, body: op.body ?? null })),
+      },
+    });
   }
   return result;
 }

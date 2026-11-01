@@ -4,6 +4,8 @@ import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { messageText } from '../../services/chat-messages.js';
 import { runSkillAutocreate } from '../../skills/autocreate.js';
+import { logEvent, turnIdOf } from '../../services/turn-log/emit.js';
+import { finishTurn } from '../../services/turn-log/store.js';
 import type { AtlasStateUpdate } from '../state.js';
 
 /**
@@ -35,6 +37,7 @@ export function answerNode(
     maxTokens?: number | undefined;
     sessionId?: string | undefined;
     messageId?: string | undefined;
+    logTurnId?: string | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): AtlasStateUpdate {
@@ -68,6 +71,29 @@ export function answerNode(
     getWriter(runnableConfig)?.({ type: 'notice', text: notice });
   }
 
+  // 📌 **这一轮收尾** —— 记进会话日志（见 [12-e E7](../../docs/12-e-需求-观测安全与验收.md)）
+  const turnId = turnIdOf(state);
+  if (state.sessionId && turnId) {
+    logEvent({
+      turnId,
+      sessionId: state.sessionId,
+      type: 'turn.finished',
+      eventKey: 'turn.finished',
+      title: '收尾',
+      payload: {
+        text,
+        steps: state.steps ?? 0,
+        turnTokens: state.turnTokens ?? 0,
+        notice,
+        haltReason: state.haltReason,
+      },
+    });
+    // 📌 **轮次状态落库** —— 网关那条路也会写一次（幂等），
+    //    但**恢复路径**（后端重启后续跑）不走网关的收尾 ——
+    //    少了这一句，那一轮会永远停在「进行中」
+    void finishTurn(turnId, 'finished');
+  }
+
   // 📌 **技能自演化** —— 异步问模型「这轮有没有值得沉淀的经验」
   //    ⚠️ **不阻塞本轮回答**（见 [12-c C4.2](../docs/12-c-需求-工具技能与扩展.md)）
   //    ⚠️ **工具调用次数不够就不问** —— 闲聊不该沉淀技能
@@ -82,7 +108,8 @@ export function answerNode(
       userText: lastUserText(state.messages),
       assistantText: text,
       toolCallCount,
-      ...(state.messageId ? { turnId: state.messageId } : {}),
+      ...(turnId ? { turnId } : {}),
+      ...(state.sessionId ? { sessionId: state.sessionId } : {}),
     }).catch((err: unknown) => {
       logger.warn({ err }, '技能自演化失败 —— 不影响本轮回答');
     });

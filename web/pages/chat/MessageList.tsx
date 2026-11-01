@@ -201,6 +201,21 @@ function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
   );
 }
 
+/**
+ * 这条消息是不是**「答到一半就没了」**。
+ *
+ * 📌 **靠落库的 `metadata.complete === false`** ——
+ *    流被中断（刷新 / 断开 / 后端重启）时，库里存的是**说到一半的内容**，
+ *    界面上必须标出来 —— 不然用户以为它答完了
+ *    （见 [12-b B13](../../docs/12-b-需求-对话与编排.md)）。
+ *
+ * ⚠️ **正在流的那条不算** —— 它本来就没答完，正在生成占位已经说清楚了。
+ */
+function isIncomplete(message: UIMessage): boolean {
+  const metadata = message.metadata as { complete?: unknown } | undefined;
+  return metadata?.complete === false;
+}
+
 export function MessageList({
   messages,
   status,
@@ -336,6 +351,11 @@ export function MessageList({
                 );
               })}
               {streaming && empty ? <TypingDots /> : null}
+              {/* 📌 **「答到一半」的提示** —— 刷新后看到半截回答时，
+                  要让人一眼看出它**没答完**（不是它就这么答的） */}
+              {!streaming && isIncomplete(message) ? (
+                <div className="atlas-incomplete">这条回答没有答完（生成时被打断了）</div>
+              ) : null}
               {!streaming && message.id === lastAssistantId ? (
                 <div className="atlas-ai-tools">
                   <button
