@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Button } from 'antd';
-import { ArrowRightOutlined, PushpinFilled, PushpinOutlined } from '@ant-design/icons';
+import { ArrowRightOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
 import {
@@ -19,18 +18,13 @@ import {
  * | 用户气泡 | 右对齐，浅色底                              |
  * | AI 气泡 | 左对齐，**不拉满整行**（拉满 = 一大块空白） |
  * | 重新生成 | 在**最后一条 AI 消息**上，**必须传 messageId** |
- * | 📌 收藏 | 在 AI 消息右上角（**消息级收藏**，见 §4.2）   |
  * | 工具卡片 | 在**正文上方**，按发生顺序排列（见 [12-b B7](../docs/12-b-需求-对话与编排.md)） |
  */
 
 interface Props {
   messages: UIMessage[];
   status: ChatStatus;
-  /** 消息级收藏（**message id → 是否收藏**） */
-  favorites: Record<string, boolean>;
   onRegenerate: (messageId: string) => void;
-  /** 消息级收藏切换 */
-  onToggleFavorite: (messageId: string) => void;
   /** 点建议问题 → 直接发出去 */
   onPickSuggestion?: (text: string) => void;
   /** 人工确认（**批准 / 取消**） */
@@ -107,9 +101,12 @@ function toBlocks(message: UIMessage): Block[] {
       continue;
     }
     if (part.type === 'data-notice') {
-      flush();
       const data = part.data as { text?: string };
-      blocks.push({ kind: 'notice', text: data?.text ?? '' });
+      const text = data?.text ?? '';
+      // ⚠️ **预算告警不进对话** —— 以前会插在 AI 回复后面，现在不显示
+      if (text.includes('告警线')) continue;
+      flush();
+      blocks.push({ kind: 'notice', text });
       continue;
     }
   }
@@ -159,11 +156,16 @@ function TypingDots() {
 /** 思考 —— 进行中展开并跟着滚到底；结束后收起。点标题可再打开。 */
 function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
   const [open, setOpen] = useState(live);
+  const [wasLive, setWasLive] = useState(live);
   const scroller = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (!live) setOpen(false);
-  }, [live]);
+  // ⚠️ **气泡比思考内容先出现** —— 第一次渲染时还没有思考文本，
+  //    `open` 会停在「关」。后面的增量到了必须跟着打开，
+  //    否则整段思考要攒完、再点开才看得到。
+  if (live !== wasLive) {
+    setWasLive(live);
+    setOpen(live);
+  }
 
   useEffect(() => {
     const el = scroller.current;
@@ -197,9 +199,7 @@ function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
 export function MessageList({
   messages,
   status,
-  favorites,
   onRegenerate,
-  onToggleFavorite,
   onPickSuggestion,
   onConfirm,
   confirming,
@@ -331,31 +331,17 @@ export function MessageList({
                 );
               })}
               {streaming && empty ? <TypingDots /> : null}
-              {/* 📌 **空的、还在跑的消息不挂工具行** —— 收藏/重新生成对一条
-                  还没出字的消息没意义，按钮杵在那儿反而像卡住了 */}
-              {streaming && empty ? null : (
+              {!streaming && message.id === lastAssistantId ? (
                 <div className="atlas-ai-tools">
-                  {/* 📌 消息级收藏（见 [04-b §4.2](../docs/04-b-ui-聊天页.md)） */}
-                  <Button
-                    type="text"
-                    size="small"
-                    className="atlas-pin"
-                    aria-label={favorites[message.id] ? '取消收藏这条消息' : '收藏这条消息'}
-                    aria-pressed={favorites[message.id] === true}
-                    icon={favorites[message.id] ? <PushpinFilled /> : <PushpinOutlined />}
-                    onClick={() => onToggleFavorite(message.id)}
-                  />
-                  {!streaming && message.id === lastAssistantId ? (
-                    <button
-                      type="button"
-                      className="atlas-redo"
-                      onClick={() => onRegenerate(message.id)}
-                    >
-                      重新生成
-                    </button>
-                  ) : null}
+                  <button
+                    type="button"
+                    className="atlas-redo"
+                    onClick={() => onRegenerate(message.id)}
+                  >
+                    重新生成
+                  </button>
                 </div>
-              )}
+              ) : null}
             </div>
           </article>
         );

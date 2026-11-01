@@ -41,7 +41,7 @@ export const PROJECT_ROOT: string = (() => {
 
 /**
  * 相对路径 → 绝对路径（相对 `PROJECT_ROOT`）。
- * ⚠️ **绝对路径原样返回** —— 沙箱可以指向项目外（比如 `WORKSPACE_ROOT=/Users/me/work`）。
+ * ⚠️ **绝对路径原样返回**。
  */
 export function resolvePath(p: string): string {
   return isAbsolute(p) ? p : resolve(PROJECT_ROOT, p);
@@ -58,8 +58,6 @@ export const DIRS = {
   memory: resolvePath('data/memory'),
   /** 技能包目录 */
   skills: resolvePath('data/skills'),
-  /** Agent 能碰到的目录（路径沙箱的基准） */
-  workspace: resolvePath('data/workspace'),
   /** 运行日志 */
   logs: resolvePath('logs'),
   /** 备份 */

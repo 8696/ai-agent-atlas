@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { DIRS, FILES, PROJECT_ROOT } from '../../config/paths.js';
+import { realpathAllowMissing } from './sandbox.js';
 
 /**
  * 上下文文件保护 —— **人格与项目指令只读**
@@ -45,6 +46,12 @@ export function protectedContextFiles(): string[] {
   }
 
   return [...files];
+}
+
+/** 这个绝对路径是不是只读的上下文文件（人格 / 项目指令 / 提示词） */
+export function isProtectedContextFile(target: string): boolean {
+  const real = realpathAllowMissing(target);
+  return protectedContextFiles().some((file) => realpathAllowMissing(file) === real);
 }
 
 /** 快照 —— 文件内容（**`null` = 本来就不存在**） */

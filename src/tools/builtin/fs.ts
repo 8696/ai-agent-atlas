@@ -4,6 +4,7 @@ import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { paths } from '../../config.js';
 import { SandboxError, assertNotWorkspaceRoot, resolveContextFile, resolveInWorkspace, resolveInWorkspaceKeepLink, toWorkspaceRelative } from '../../lib/security/sandbox.js';
+import { isProtectedContextFile } from '../../lib/security/context-files.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
 import { hasWildcard, matchesGlob } from '../glob.js';
@@ -14,7 +15,8 @@ import type { ToolDefinition, ToolResult } from '../types.js';
  * （见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）。
  *
  * ⚠️ **所有路径都过 `lib/security/sandbox.ts`** —— 越界明确报错，不静默失败。
- * ⚠️ **给模型的路径是工作区内的相对路径** —— 绝对路径会泄露目录结构。
+ * ⚠️ **给模型的路径相对项目根** —— 例如 `data/skills/某技能/SKILL.md`，
+ *    不要再加 `data/workspace` 前缀。
  */
 
 /** 搜索时默认跳过的目录（**别把 `node_modules` 翻一遍**） */
@@ -55,10 +57,10 @@ const readFileSchema = z.object({
 export const readFileTool: ToolDefinition = {
   name: 'read_file',
   description:
-    '读取工作区内某个文本文件的内容。可以指定行范围（offset 从 1 开始，limit 是行数）。' +
+    '读取项目里的文本文件。路径相对项目根，例如 `data/skills/某技能/SKILL.md`，' +
+    '不要加 `data/workspace` 前缀。可以指定行范围（offset 从 1 开始，limit 是行数）。' +
     '文件很大时会自动截断并注明原始长度。' +
-    '另外 `AGENTS.md` / `SOUL.md`（项目指令与人格，在项目根目录）也能读 —— ' +
-    '系统提示词里只带了它们的前一截，要看完整内容就用这个。',
+    '`AGENTS.md` / `SOUL.md` 也能读 —— 系统提示词里只带了前一截，要看全文就用这个。',
   schema: readFileSchema,
   sensitivity: 'normal',
   source: 'builtin',
@@ -117,8 +119,10 @@ const writeFileSchema = z.object({
 export const writeFileTool: ToolDefinition = {
   name: 'write_file',
   description:
-    '把内容写进工作区内的文件。默认**不覆盖**已有文件 —— 要覆盖必须显式传 overwrite=true，' +
-    '要追加传 append=true。父目录不存在会自动创建。',
+    '把内容写进项目里的文件。路径相对项目根，例如 `data/skills/某技能/SKILL.md`。' +
+    '默认**不覆盖**已有文件 —— 要覆盖必须显式传 overwrite=true，' +
+    '要追加传 append=true。父目录不存在会自动创建。' +
+    '人格、项目指令和提示词文件只读，不能写。',
   schema: writeFileSchema,
   sensitivity: 'high',
   source: 'builtin',
@@ -128,6 +132,9 @@ export const writeFileTool: ToolDefinition = {
     try {
       const input = parseArgs(writeFileSchema, args);
       const target = resolveInWorkspace(input.path, paths.workspaceRoot);
+      if (isProtectedContextFile(target)) {
+        return done(fail(new SandboxError('人格、项目指令和提示词文件只读，不能写')));
+      }
       const exists = lstatSync(target, { throwIfNoEntry: false });
       if (exists && !input.overwrite && !input.append) {
         return done({
@@ -165,8 +172,8 @@ const listDirSchema = z.object({
 export const listDirTool: ToolDefinition = {
   name: 'list_dir',
   description:
-    '列出工作区内某个目录的内容（不递归；要递归搜索用 search_files）。' +
-    '不传 path 就是工作区根目录。',
+    '列出项目里某个目录的内容（不递归；要递归搜索用 search_files）。' +
+    '路径相对项目根。不传 path 就是项目根。技能在 `data/skills`。',
   schema: listDirSchema,
   sensitivity: 'low',
   source: 'builtin',
@@ -217,8 +224,8 @@ const deletePathSchema = z.object({
 export const deletePathTool: ToolDefinition = {
   name: 'delete_path',
   description:
-    '删除工作区内的文件或目录。**不可撤销** —— 删之前先确认清楚。' +
-    '工作区根目录不能删；软链只删链接本身，不删它指向的东西。',
+    '删除项目里的文件或目录。路径相对项目根。**不可撤销** —— 删之前先确认清楚。' +
+    '项目根目录不能删；人格、项目指令和提示词文件不能删；软链只删链接本身，不删它指向的东西。',
   schema: deletePathSchema,
   sensitivity: 'high',
   source: 'builtin',
@@ -231,6 +238,9 @@ export const deletePathTool: ToolDefinition = {
       //    （见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）
       const target = resolveInWorkspaceKeepLink(input.path, paths.workspaceRoot);
       assertNotWorkspaceRoot(target, paths.workspaceRoot);
+      if (isProtectedContextFile(target)) {
+        return done(fail(new SandboxError('人格、项目指令和提示词文件只读，不能删')));
+      }
       const stat = lstatSync(target, { throwIfNoEntry: false });
       if (!stat) {
         return done({ ok: false, output: `路径不存在：${input.path}`, error: 'NOT_FOUND' });
@@ -272,8 +282,8 @@ const searchFilesSchema = z.object({
 export const searchFilesTool: ToolDefinition = {
   name: 'search_files',
   description:
-    '在工作区内按文件名通配（pattern，如 `*.ts`）或按内容（content）搜索文件。' +
-    '默认跳过 node_modules / .git / dist 这些目录。',
+    '在项目里按文件名通配（pattern，如 `*.ts`）或按内容（content）搜索文件。' +
+    '路径相对项目根。默认跳过 node_modules / .git / dist 这些目录。',
   schema: searchFilesSchema,
   sensitivity: 'low',
   source: 'builtin',

@@ -10,7 +10,7 @@ import { useModelStore } from '../../lib/stores/modelStore';
  * | 元素   | 规格                                       |
  * | ------ | ------------------------------------------ |
  * | 输入框 | 多行，`Enter` 发送 · `Shift+Enter` 换行     |
- * | 发送   | 空内容时禁用；发送中变成「停止」            |
+ * | 发送   | 空内容时禁用；AI 还没答完时不能再发，按钮变成「停止」 |
  * | 停止   | 调 `chat.stop()`；已输出的内容保留          |
  *
  * 📌 **斜杠命令补全**（见 [12-b B9](../../docs/12-b-需求-对话与编排.md)）：
@@ -124,7 +124,9 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
 
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled) return;
+    // ⚠️ **这一轮还没答完就不能再发** —— 按钮已经换成「停止」，
+    //    回车也得拦住，不然会在同一条会话里叠出下一条
+    if (!text || disabled || busy) return;
     setValue('');
     setActive(-1);
     onSubmit(text);

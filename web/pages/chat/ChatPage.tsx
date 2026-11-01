@@ -9,7 +9,7 @@ import { MessageList } from './MessageList';
 import { toUserMessage } from '../../lib/apiError';
 import { useModelStore } from '../../lib/stores/modelStore';
 import { useSessionStore } from '../../lib/stores/sessionStore';
-import { createSession, confirmToolCall, fetchSession, toggleMessageFavorite } from '../../lib/api';
+import { createSession, confirmToolCall, fetchSession } from '../../lib/api';
 import type { StoredMessage } from '../../lib/api';
 
 /**
@@ -59,8 +59,6 @@ export function ChatPage() {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   /** 会话不存在了（被删了 / 库换了） */
   const [sessionMissing, setSessionMissing] = useState(false);
-  /** 消息级收藏（**message id → true**） */
-  const [favorites, setFavorites] = useState<Record<string, boolean>>({});
   /** 刚建好、还没回填的会话（**回填会把刚发的消息冲掉**） */
   const pendingSessionRef = useRef<string | null>(null);
   /** 已经自动发过的问题（**刷新不重复问**） */
@@ -86,7 +84,6 @@ export function ChatPage() {
   useEffect(() => {
     if (!sessionId) {
       setMessages([]);
-      setFavorites({});
       setSessionMissing(false);
       historyReadyRef.current = Promise.resolve();
       return;
@@ -103,13 +100,6 @@ export function ChatPage() {
         if (!alive) return;
         setSessionMissing(false);
         setMessages(data.messages.map(toUiMessage));
-        setFavorites(
-          Object.fromEntries(
-            data.messages
-              .filter((message) => message.favorite)
-              .map((message) => [message.id, true]),
-          ),
-        );
       } catch {
         if (!alive) return;
         setSessionMissing(true);
@@ -133,17 +123,27 @@ export function ChatPage() {
     return created.id;
   }, [setSearchParams, upsertSession]);
 
+  /** 这一轮还没结束（**连上请求到流结束**）—— 挡住连点 */
+  const turnLock = useRef(false);
+
   const submit = useCallback(
     async (text: string) => {
-      clearError();
-      // ⚠️ **先等历史回填完** —— 刚切到另一个会话就发消息的话，
-      //    这时 `messages` 还是上一个会话的，发出去会把上一个会话的消息
-      //    写进新会话的库里
-      await historyReadyRef.current;
-      const target = sessionId ?? (await ensureSession());
-      await sendMessage({ text }, { body: { sessionId: target } });
+      // ⚠️ **AI 没答完不准发下一条** —— 同一会话里只能有一轮在跑
+      if (turnLock.current || status === 'submitted' || status === 'streaming') return;
+      turnLock.current = true;
+      try {
+        clearError();
+        // ⚠️ **先等历史回填完** —— 刚切到另一个会话就发消息的话，
+        //    这时 `messages` 还是上一个会话的，发出去会把上一个会话的消息
+        //    写进新会话的库里
+        await historyReadyRef.current;
+        const target = sessionId ?? (await ensureSession());
+        await sendMessage({ text }, { body: { sessionId: target } });
+      } finally {
+        turnLock.current = false;
+      }
     },
-    [clearError, ensureSession, sendMessage, sessionId],
+    [clearError, ensureSession, sendMessage, sessionId, status],
   );
 
   // ⚠️ **submit 的最新引用** —— 自动发送的定时器要用它，不能吃闭包里的旧值
@@ -187,21 +187,6 @@ export function ChatPage() {
     }
     void regenerate({ messageId, body: { sessionId } });
   };
-
-  /** 消息级收藏（📌） */
-  const toggleFavorite = useCallback(
-    async (messageId: string) => {
-      const next = !favorites[messageId];
-      setFavorites((prev) => ({ ...prev, [messageId]: next }));
-      try {
-        const updated = await toggleMessageFavorite(messageId, next);
-        setFavorites((prev) => ({ ...prev, [messageId]: updated.favorite }));
-      } catch {
-        setFavorites((prev) => ({ ...prev, [messageId]: !next }));
-      }
-    },
-    [favorites],
-  );
 
   /** 人工确认（**批准 / 取消**） */
   const [confirming, setConfirming] = useState(false);
@@ -290,13 +275,6 @@ export function ChatPage() {
       void fetchSession(sessionId)
         .then((data) => {
           setMessages(data.messages.map(toUiMessage));
-          setFavorites(
-            Object.fromEntries(
-              data.messages
-                .filter((message) => message.favorite)
-                .map((message) => [message.id, true]),
-            ),
-          );
         })
         .catch(() => {
           // 拉不到就维持现状
@@ -387,9 +365,7 @@ export function ChatPage() {
           <MessageList
             messages={messages}
             status={status}
-            favorites={favorites}
             onRegenerate={regenerateAnswer}
-            onToggleFavorite={(messageId) => void toggleFavorite(messageId)}
             onPickSuggestion={(text) => void submit(text)}
             onConfirm={(approved, toolCallId, fingerprint) =>
               void handleConfirm(approved, toolCallId, fingerprint)

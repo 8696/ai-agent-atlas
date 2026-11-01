@@ -312,11 +312,3 @@ export async function checkBudget(now: Date = new Date()): Promise<BudgetStatus>
     blocked: over && config.COST_BUDGET_BLOCK,
   };
 }
-
-/** 预算告警的一句话（**给对话里回一句提示**） */
-export function budgetWarningText(status: BudgetStatus): string {
-  const percent = Math.round(status.ratio * 100);
-  return `本月 token 已用 ${status.used} / ${status.budget}（${percent}%）—— 超过 ${Math.round(
-    config.WARN_RATIO * 100,
-  )}% 告警线。`;
-}

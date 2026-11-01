@@ -64,8 +64,14 @@ export const paths = {
   projectRoot: PROJECT_ROOT,
   ...DIRS,
   ...FILES,
-  /** 实际生效的沙箱根（`WORKSPACE_ROOT` 可配，可能指向项目外） */
-  workspaceRoot: resolvePath(config.WORKSPACE_ROOT),
+  /**
+   * 文件工具的沙箱根 —— **就是项目根**。
+   *
+   * ⚠️ **不再另设 `data/workspace`** —— 相对路径按项目根解析，
+   *    `data/skills` 就是 `data/skills`，不会再被拼成 `data/workspace/data/skills`。
+   *    项目外面的路径仍然拒绝。
+   */
+  workspaceRoot: PROJECT_ROOT,
   /** 实际生效的业务库路径（`DATABASE_PATH` 可配） */
   databaseFile: resolvePath(config.DATABASE_PATH),
 } as const;

@@ -150,12 +150,12 @@ export const executeCodeTool: ToolDefinition = {
     const input = parseArgs(codeSchema, args);
     const timeoutMs = input.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-    // 📌 **工作区必须存在** —— 子进程的 cwd 不存在就起不来
+    // 📌 **项目根必须存在** —— 子进程的 cwd 不存在就起不来
     mkdirSync(paths.workspaceRoot, { recursive: true });
 
     const result = await runSandboxScript({
       code: input.code,
-      // 📌 **cwd 是工作区** —— 脚本看到的相对路径都在工作区里
+      // 📌 **cwd 是项目根** —— 脚本里的相对路径从项目根算
       cwd: paths.workspaceRoot,
       timeoutMs,
       onRpc: (tool, rpcArgs) => handleRpc(tool, rpcArgs, context),

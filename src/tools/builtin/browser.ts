@@ -245,7 +245,7 @@ export const browserTool: ToolDefinition = {
         }
 
         case 'screenshot': {
-          const dir = join(paths.workspaceRoot, 'screenshots');
+          const dir = join(paths.data, 'screenshots');
           mkdirSync(dir, { recursive: true });
           const file = join(dir, `shot-${nanoid(8)}.png`);
           const buffer = await page.screenshot({ fullPage: false });

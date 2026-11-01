@@ -24,7 +24,7 @@ import { extractText } from '../services/chat-messages.js';
 import { resolvePendingDecision } from '../services/pending-confirm.js';
 import { findSession, touchSession } from '../services/session.js';
 import { parseCommand, runCommand, COMMANDS, skillNames } from '../services/command.js';
-import { checkBudget, budgetWarningText } from '../services/cost.js';
+import { checkBudget } from '../services/cost.js';
 import { runMemoryExtraction } from '../services/memory/extract.js';
 import { listPersonalities } from '../services/prompt.js';
 
@@ -112,8 +112,6 @@ function respondWithStream(
     messageId: string;
     sessionId?: string | undefined;
     modelName: string;
-    /** 附加一条提示（**预算告警之类**） */
-    notice?: string | undefined;
     /** 流结束后要做的事（**记忆抽取**） */
     after?: ((text: string) => void) | undefined;
     /** 流彻底结束时调（**注销流登记**） */
@@ -161,9 +159,8 @@ function respondWithStream(
   void (async () => {
     try {
       const source = options.makeEvents(abort.signal);
-      const withNotice = options.notice ? prependNotice(source, options.notice) : source;
       for await (const chunk of createChatEventStream({
-        events: withNotice,
+        events: source,
         messageId: options.messageId,
       })) {
         parts.add(chunk);
@@ -254,15 +251,6 @@ async function writeChunk(stream: PassThrough, payload: string): Promise<void> {
     stream.once('close', done);
     stream.once('error', done);
   });
-}
-
-/** 在事件流前面插一条提示 */
-async function* prependNotice(
-  events: AsyncIterable<ChatEvent>,
-  notice: string,
-): AsyncGenerator<ChatEvent> {
-  yield { type: 'notice', text: notice };
-  yield* events;
 }
 
 /**
@@ -371,7 +359,6 @@ chatRouter.post('/chat', async (ctx) => {
     messageId: assistantMessageId,
     ...(sessionId ? { sessionId } : {}),
     modelName: model.name,
-    ...(budget.warn ? { notice: budgetWarningText(budget) } : {}),
     after: (text) => {
       // 📌 **记忆抽取：fire-and-forget**（不阻塞这一轮）
       void runMemoryExtraction({ userText, assistantText: text }).catch((err) => {

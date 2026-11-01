@@ -30,8 +30,6 @@ export const envSchema = z.object({
 
   // ── 存储 ──────────────────────────────────────────────
   DATABASE_PATH: z.string().default('data/atlas.db'),
-  /** Agent 能碰到的目录根（路径沙箱的基准） */
-  WORKSPACE_ROOT: z.string().default('data/workspace'),
 
   // ── 模型 ──────────────────────────────────────────────
   // ⚠️ **只有一个模型，纯标量** —— 一个 Base URL + 一个 Key + 一个模型标识。

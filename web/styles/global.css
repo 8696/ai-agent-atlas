@@ -18,7 +18,6 @@ html[data-theme='light'] {
   --atlas-accent-soft: #e6f0ec;
   --atlas-mark: #1f4f46;
   --atlas-on-mark: #f7f3ea;
-  --atlas-user: #e5f0eb;
   --atlas-user-mark: #2c2926;
   --atlas-on-user: #f7f3ea;
   --atlas-code-bg: #f3efe8;
@@ -45,7 +44,6 @@ html[data-theme='dark'] {
   --atlas-accent-soft: #1d2c28;
   --atlas-mark: #1f4f46;
   --atlas-on-mark: #f7f3ea;
-  --atlas-user: #24332e;
   --atlas-user-mark: #2c2926;
   --atlas-on-user: #f7f3ea;
   --atlas-code-bg: #141a17;
@@ -478,13 +476,12 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
 
 .atlas-bubble-user {
   max-width: min(78%, 520px);
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--atlas-user);
+  padding-top: 3px;
   color: var(--atlas-ink);
+  font-size: 15px;
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
-  line-height: 1.65;
 }
 
 .atlas-row-ai {
@@ -528,14 +525,6 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
   align-items: center;
   gap: 8px;
   min-height: 24px;
-}
-
-.atlas-pin {
-  color: var(--atlas-muted);
-}
-
-.atlas-pin:hover {
-  color: var(--atlas-accent);
 }
 
 .atlas-think-label,

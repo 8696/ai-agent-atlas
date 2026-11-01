@@ -30,7 +30,7 @@ import type { ToolDefinition, ToolResult } from '../types.js';
 /** shell 命令 */
 const shellSchema = z.object({
   command: schemas.text(4000),
-  /** 工作目录（**默认工作区根**；必须在工作区内） */
+  /** 工作目录（**默认项目根**；必须在项目内） */
   cwd: schemas.path.optional(),
   /** 超时（毫秒，默认取 `TOOL_TIMEOUT_MS`） */
   timeoutMs: z.number().int().min(100).max(600_000).optional(),
@@ -39,8 +39,8 @@ const shellSchema = z.object({
 export const shellTool: ToolDefinition = {
   name: 'shell',
   description:
-    '在工作区里执行一条 shell 命令（Unix 用 /bin/sh，Windows 用 cmd）。' +
-    '工作目录固定在工作区内。命令有危险黑名单，命中会被直接拒绝。' +
+    '在项目目录里执行一条 shell 命令（Unix 用 /bin/sh，Windows 用 cmd）。' +
+    '工作目录默认是项目根，不能跑到项目外面。命令有危险黑名单，命中会被直接拒绝。' +
     '输出过长会截断（保留尾部）。',
   schema: shellSchema,
   sensitivity: 'high',
