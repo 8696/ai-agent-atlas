@@ -34,9 +34,9 @@ interface Props {
 }
 
 const SUGGESTIONS = [
-  '用三句话介绍一下这个项目',
-  '这个仓库的目录结构是怎么分的？',
-  '我该怎么启动前后端？',
+  '你现在能帮我做哪些事？',
+  '把这个仓库的目录结构讲一遍',
+  '记住：以后都用中文回复我',
 ];
 
 function partText(message: UIMessage, type: 'text' | 'reasoning'): string {
