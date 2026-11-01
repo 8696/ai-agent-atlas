@@ -1,229 +1,221 @@
 # Atlas
 
-> **跑在本地的通用型 AI Agent** —— 后台起 HTTP 服务，Web 端打开就能聊；
-> Agent 判断意图后调用工具（文件 / 目录 / 命令 / 请求 / 时间），
-> 用 **LangGraph.js** 编排，可中断、可确认、可断点恢复。
-
-```
-┌────────────┐   SSE / REST   ┌──────────────────────┐   工具   ┌──────────────┐
-│  浏览器     │ ─────────────► │  Atlas 后端（Koa）    │ ───────► │ 文件 / 命令  │
-│ React 19    │ ◄───────────── │  LangGraph.js 编排    │ ◄─────── │ HTTP / 时间   │
-│ AntD 6     │                └──────────┬───────────┘         └──────────────┘
-└────────────┘                           │
-                                 ┌─────┴──────┐
-                                 │ SQLite     │  对话 / 工具流水 / FTS5 索引
-                                 │ 文件       │  提示词 / 记忆 / Skill / 配置
-                                 └────────────┘
-```
-
----
+跑在你自己电脑上的通用 AI Agent。打开网页就能对话；它会读文件、跑命令、发请求、开浏览器，危险操作先问你再执行。编排用 [LangGraph.js](https://github.com/langchain-ai/langgraphjs)，数据落在本地 SQLite 和 Markdown 文件里，不需要登录，也不需要向量数据库。
 
 ## 特性
 
-- **本地单用户 · 打开就用**：一个实例 = 一个使用者，**不需要登录**，数据全在自己机器上
-- **LangGraph.js 编排**：状态图 + 条件边 + checkpointer + `interrupt` 人工确认
-- **流式对话**：逐字输出；工具调用卡片、待确认卡片都落库，刷新后还在
-- **危险操作要人确认**：Shell / 写文件 / 浏览器 / 沙箱代码默认弹确认；
-  路径沙箱 + 出网校验 + 命令黑名单三道闸
-- **长期记忆是 Markdown**：`MEMORY.md` / `USER.md` 两个文件，人能直接读直接改；
-  跨会话检索走 SQLite FTS5（**不依赖 embedding 模型**）
-- **12 个内置工具**：文件 / 目录 / 搜索 / Shell / HTTP / 抓页 / 联网搜索 / 浏览器 /
-  沙箱代码 / 时间
-- **技能会自己沉淀**：干完复杂的事，Agent 自动把经验写成可复用的 `SKILL.md`
-- **可扩展**：统一工具注册表 —— 内置工具、Skill 自带脚本、MCP server 暴露的工具走同一条路
-- **配置全在 `.env`**：模型（`LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 三行，
-  换供应商不改代码）+ 通用配置，共 40 个 key，zod 启动时校验 —— **没有设置页**
-- **上下文与记忆是文件**：项目指令 `AGENTS.md` · 人格 `SOUL.md` · 提示词 `prompts/*.md` ·
-  长期记忆 `data/memory/*.md`（人能直接读直接改）
-- **斜杠命令 + 子代理 + 定时任务**：`/help` `/usage` `/compress` `/skills` … ；
-  可派隔离子代理并行干活；可挂自然语言定时任务
-- **成本可控**：每轮记账、超预算有闸（不设上限的话，一次跑飞就烧完）
+### 对话
 
-> 🎯 **形态对标 [Hermes Agent](https://github.com/NousResearch/hermes-agent)**
-> （Nous Research，2026-02 开源，MIT）—— 本地跑、通用 Agent、无登录、
-> 配置在文件里、记忆是 Markdown、技能能自动沉淀。
+- 网页打开就能聊，流式逐字输出，支持 Markdown 和思考过程。
+- 等首个字的空窗有加载指示，不会看起来像卡住。
+- 会话落在本地 SQLite：侧栏列表、历史会话页、搜索、收藏、保留期清理。刷新后历史还在。
+- 工具调用显示成卡片：调了哪个工具、参数、返回、耗时。刷新后卡片还在。
+- 13 条斜杠命令（`/help`、`/new`、`/compress`、`/usage`、`/memory`、`/skills` 等），服务端解析，不消耗模型 token。
+- 长会话超预算会自动折成摘要，也可以手动 `/compress`。
+- `/undo` 回退上一轮，`/retry` 重新生成，`/reset` 清空当前上下文（历史记录保留）。
+- 思考模式可以按会话开关。
 
-> **当前状态：阶段 0 完成 · 阶段 1「能干活」主干完成 · 阶段 2「记得住」完成 ·
-> 阶段 4「能扩展、能自动」基本做完**
-> —— 「打开网页就能跟模型对话」已跑通
-> （聊天页 + 流式回复 + 提示词文件热生效），**会话也落库了**
-> （侧栏会话列表 + 历史会话页 + 刷新后历史还在），
-> **而且现在它真的能干活、也记得住**：
->
-> - **能调工具**：12 个内置工具（文件 / 目录 / 命令 / HTTP / 抓网页 / 搜索 / 时间 /
->   沙箱代码 / 浏览器）
-> - **危险操作先问人**：跑命令、写文件、删除都要弹确认卡片，批准才执行
-> - **工具卡片**：调了哪个工具、传了什么、返回了什么、耗时多久（刷新后还在）
-> - **后端重启能接着跑**：待确认的卡片还在，批准后从断点继续
-> - **记得住**：长期记忆是两个 Markdown 文件（`data/memory/MEMORY.md` · `USER.md`），
->   写前过安全扫描，召回带用量表头
-> - **翻得动旧账**：跨会话检索走 FTS5 + trigram（**中文短句能搜到**）
-> - **长会话不撑爆**：超预算自动折成摘要，`/compress` 手动也行
-> - **斜杠命令**：12 条，服务端解析，**零 token**
-> - **会用技能**：把技能目录拷进 `data/skills/` → 命中就把说明注入上下文；
->   技能自带的脚本走同一套确认闸
-> - **会自己长本事**：干完一件复杂的事（工具调用 ≥ 5 次），自动沉淀出一个新技能
-> - **能接外部工具**：MCP server 配在 `data/mcp.json` → 启动接上 → 工具进池子
->   （第三方工具默认每次要确认）
-> - **到点自己干活**：定时任务写进 `data/cron.json` → 每分钟检查 → 到点跑一次
->   （要人工确认的步骤跳过并记录，不挂死）
-> - **能把活拆开并行做**：`spawn_subagent` 派给隔离子代理（看不到主对话历史，
->   危险操作照样要确认），回一段摘要
-> - **能在沙箱里跑脚本**：`execute_code` 在受限子进程里跑 JS，
->   脚本里能 RPC 调别的工具（**中间结果不进对话上下文**）
-> - **能开无头浏览器**：`browser` 走 Playwright（域名白名单 + 每次都要确认）
-> - **项目指令进上下文**：`AGENTS.md` 每轮注入（超长会截断，模型能自己读全文）
-> - **模型挂了自动顶上**：主模型失败且还没吐字 → 自动切备用模型
->
-> **27 条需求全部 ✅**（A1~A5 · B1~B11 · C1~C6 · D1~D4 · E4）。
-> 状态表见 [docs/12-e §E5](./docs/12-e-需求-观测安全与验收.md)。
->
-> 📋 **需求状态**：每条需求标题末尾带徽标（⬜ 未实现 / 🟡 部分实现 / ✅ 已实现），
-> 进度速览与维护规则见 [12-e §E5](./docs/12-e-需求-观测安全与验收.md)。
-> 🧱 **实施路线**（分阶段 / 人日量级 / 砍需求顺序）也在同一节。
+### 工具
 
----
+- 14 个内置工具：读 / 写 / 列目录 / 删除 / 搜索文件、Shell、HTTP 请求、抓网页、联网搜索、当前时间、沙箱代码、无头浏览器、记忆读写、记忆删除。
+- 编排是 LangGraph.js 状态图：判断意图、调工具、结果回灌、再判断，直到可以回答。单轮步数有上限，同一个工具连续调用也会被拦住。
+- 每轮按相关度裁剪暴露给模型的工具，避免一次塞进全部工具。
+- 不需要确认的多个工具可以并行执行。
 
-## 技术栈
+### 确认与恢复
 
-| 层       | 选型                                                            |
-| -------- | --------------------------------------------------------------- |
-| 运行时   | Node ≥ 22.4 · TypeScript 7（strict）· ESM                        |
-| 编排     | **LangGraph.js**（`@langchain/langgraph` 1.5.x）                |
-| 模型     | LangChain Core ChatModel（Anthropic / OpenAI 兼容端点）           |
-| 消息流   | AI SDK UI Message Stream（前端 `useChat`）+ 后端事件翻译层       |
-| 后端     | Koa 3 · `@koa/router` · zod · Sequelize 6 + umzug · SQLite        |
-| 检索     | SQLite FTS5（全文索引，`tokenize='trigram'` 支持中文）         |
-| 前端     | React 19 · Vite 8 · Ant Design **6** · react-router-dom 7 · zustand |
-| 测试     | Vitest 5 · Playwright                                           |
+- 写文件、删文件、跑命令、开浏览器、跑技能脚本、接进来的第三方工具，默认先弹确认卡片，批准才执行。
+- 确认挂起会写进检查点。后端重启后卡片还在，批准后从断点接着跑。
+- 永久删除记忆也会先问一次。
 
-> ⚠️ **Ant Design 是 v6**（不是 v4/v5），`Alert message` → `title`、
-> `destroyOnClose` → `destroyOnHidden`。
-> ⚠️ **模型调用走 LangChain，AI SDK 只用于协议** —— 不要在后端用 `streamText` 起第二套流式栈。
+### 记忆
 
----
+- 长期记忆是两个 Markdown 文件：`data/memory/MEMORY.md` 和 `USER.md`，可以直接打开改。
+- 对话里说「记住 X」「把那条删掉」「清空记忆」就会改文件，不必去命令行。
+- 写进记忆前会做安全扫描，并有字符上限。
+- 每轮按相关度召回，带用量，受条数和 token 预算限制。
+- 跨会话检索走 SQLite FTS5 + trigram，中文短句能搜到，不需要 embedding 模型。
+- 会话结束后会尝试从对话里抽出值得记住的事实；这一轮如果已经手动写过记忆，就不再自动抽一遍。
+
+### 技能、MCP、定时任务、子代理
+
+- 技能包是 `data/skills/<name>/SKILL.md`。命中后把说明注入系统提示词，受条数和 token 预算限制。
+- 带脚本的技能会注册成一个工具，走同一套确认闸。
+- 一轮里工具调用达到阈值后，可以把这次做法沉淀成新技能（有冷却，一轮最多建一个）。
+- MCP server 配在 `data/mcp.json`，支持 stdio、SSE、HTTP。工具名带 server 前缀，一个 server 挂了不影响其他 server，也可以只暴露白名单里的工具。
+- 定时任务写在 `data/cron.json`，可以用自然语言描述时间，由模型解析成 cron。到点自己跑；需要人工确认的步骤会跳过并记一笔，不会把调度挂死。
+- `spawn_subagent` 把子任务派给看不到主对话历史的子代理，可以并行，结果以摘要回灌。子代理里的危险操作照样要确认。
+
+### 模型与成本
+
+- 三个环境变量切换供应商：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。Anthropic 兼容和 OpenAI 兼容端点都可以。
+- 主模型失败且还没开始输出时，自动切到备用模型。
+- 可配置推理预算、温度和单次输出上限。
+- 每轮把 token 和费用记进 `cost_logs`。月度预算到达告警线会提示，也可以设成超预算直接拦住。
+- `/usage` 和 `yarn cost:report` 查看用量。
+
+### 安全
+
+- 默认只听回环地址。改成对局域网开放时，启动日志会打出告警。
+- 文件路径会解析符号链接，必须落在工作区里。`AGENTS.md`、`SOUL.md` 这类上下文文件不允许被工具改写。
+- 出网拒绝私网、回环和云元数据地址，重定向逐跳检查。
+- 命令有黑名单；`SHELL_ENABLED=false` 时模型也看不到 `shell`。
+- 沙箱代码跑在受限子进程里，没有 `require`、`process`、`fetch`。沙箱里只能再调用不需要确认的工具。
+- 浏览器按域名白名单限制，每个请求都再查一次。
+- 工具返回标成不可信数据。注入检测命中后收紧本轮可用的工具档位。日志和工具输出里的密钥会打码。
 
 ## 快速开始
 
+需要 Node.js ≥ 22.4 和 Yarn ≥ 1.22。
+
 ```bash
 yarn install
-cp .env.example .env      # 填模型 API Key（回环端点可以留空）
+cp .env.example .env
+# 编辑 .env，填上 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL
 yarn dev
 ```
 
-- 前端 <http://localhost:5180> · 后端 <http://localhost:3100>
-- 首次访问会引导创建本地账号 → 强制改密 → 去「设置 → 模型」填一条模型 → 回聊天页开聊
+- 前端：<http://localhost:5180>
+- 后端：<http://localhost:3100>
 
-**不用 Docker，不用 MySQL，不用 Qdrant。**
+打开前端会直接进入聊天页。没配模型时，页面会提示去改 `.env`，不会报一个空白的 500。
 
-### 生产模式
+生产模式：
 
 ```bash
 yarn build
-yarn migrate      # ⚠️ 生产不自动跑迁移，先跑再起
+yarn migrate    # 生产环境不会自动跑迁移
 yarn start
 ```
 
-### 常用命令
+## 配置
 
-| 命令                | 作用                                       |
-| ------------------- | ------------------------------------------ |
-| `yarn dev`          | 前后端一起起（后端带热重载）                |
-| `yarn run check`    | **默认验证闸**：typecheck + lint             |
-| `yarn typecheck`    | 两份 tsconfig 全量类型检查                 |
-| `yarn lint`         | ESLint（类型感知，0 warning 才算过）        |
-| `yarn test`         | unit + integration                          |
-| `yarn test:e2e`     | Playwright（首次要先 `npx playwright install chromium`） |
-| `yarn migrate`      | 跑 pending 迁移                             |
-| `yarn backup`       | 备份业务库 + 记忆文件（`backups/*.tar.gz`）  |
-| `yarn data:clean`   | 清测试残留（**默认干跑**，`--yes` 才真删）  |
-| `yarn env:check`    | 校验 `.env` / `.env.example` 结构一致        |
+所有配置都在项目根目录的 `.env`，启动时用 zod 校验。改完重启生效。提示词、人格和记忆是内容文件，不放在环境变量里。
 
----
+| 要改什么 | 放哪里 |
+| --- | --- |
+| 模型 | `.env` 的 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` |
+| 备用模型 | `.env` 的 `LLM_FALLBACK_*`（留空表示没有兜底） |
+| 项目指令 | `AGENTS.md`（每轮注入，超长会截断） |
+| 人格 | `SOUL.md` |
+| 系统提示词 | `prompts/*.md` |
+| 长期记忆 | `data/memory/MEMORY.md`、`data/memory/USER.md` |
+| 技能 | `data/skills/<name>/SKILL.md` |
+| MCP | `data/mcp.json` |
+| 定时任务 | `data/cron.json` |
 
-## 文档
+`.env.example` 里有每一项的注释。模型端点示例（都提供 Anthropic 兼容接口）：
 
-> 26 份主题文档（编号 01–13，含子文档）。**文档 = 系统规格**：改了代码要改文档。
+| 供应商 | `LLM_BASE_URL` | `LLM_MODEL` |
+| --- | --- | --- |
+| 智谱 | `https://open.bigmodel.cn/api/anthropic` | `glm-5.3` |
+| DeepSeek | `https://api.deepseek.com/anthropic` | `deepseek-v4-pro` |
+| 通义千问 | `https://dashscope.aliyuncs.com/apps/anthropic` | `qwen3.8-max` |
+| MiniMax | `https://api.minimaxi.com/anthropic` | `MiniMax-M3` |
 
-| 编号  | 文档                                                              | 用途                       |
-| ----- | ----------------------------------------------------------------- | -------------------------- |
-| 01    | [需求与场景](./docs/01-需求与场景.md)                              | 业务目标 · 角色 · Out of Scope |
-| 02    | [系统架构与目录](./docs/02-系统架构与目录.md)                      | 架构图 · 数据流 · 目录结构  |
-| 03-a  | [技术栈 · 工程化规范](./docs/03-a-技术栈-工程化规范.md)             | 工具链 · 目录 · 提交 · 环境变量 |
-| 03-b  | [技术栈 · 后端栈](./docs/03-b-技术栈-后端栈.md)                     | Koa · **LangGraph 用法** · Sequelize |
-| 03-c  | [技术栈 · 前端栈](./docs/03-c-技术栈-前端栈.md)                     | Vite · React · AntD · 路由  |
-| 04-a  | [UI · 总则布局与菜单](./docs/04-a-ui-总则布局与菜单.md)             | 设计总则 · 布局 · 菜单树    |
-| 04-b  | [UI · 聊天页](./docs/04-b-ui-聊天页.md)                 | 聊天页 / 历史会话页          |
-| 04-c  | [UI · 配置入口](./docs/04-c-ui-配置入口.md)                            | 配置放在哪（无界面）        |
-| 04-d  | [UI · 公共组件](./docs/04-d-ui-公共组件.md)                         | 公共组件 · 错误页           |
-| 05-a  | [数据模型 · SQLite](./docs/05-a-数据模型-sqlite.md)                 | 表结构                      |
-| 05-b  | [数据模型 · 全文检索](./docs/05-b-数据模型-全文检索.md)             | FTS5 设计                  |
-| 06    | [大模型与模型解析](./docs/06-大模型与模型解析.md)                     | 供应商 · 模型解析 · 提示词组装 |
-| 07-a  | [模块 · LLM 与 Prompt](./docs/07-a-模块-llm与prompt.md)            | 模块 01-03                 |
-| 07-b  | [模块 · 工具与 Skill](./docs/07-b-模块-工具与skill.md)              | 模块 04-06                 |
-| 07-c  | [模块 · 记忆与会话](./docs/07-c-模块-记忆与会话.md)                | 模块 07-09                 |
-| 07-d  | [模块 · 编排](./docs/07-d-模块-编排.md)                            | 模块 10-12（LangGraph）    |
-| 07-e  | [模块 · 成本与预算](./docs/07-e-模块-成本与预算.md)            | 模块 13-15                 |
-| 07-f  | [模块 · 安全与全栈](./docs/07-f-模块-安全与全栈.md)                | 模块 16-18                 |
-| 10    | [安全方案](./docs/10-安全方案.md)                                   | 威胁模型 · 三道闸 · 审计    |
-| 11    | [部署运维与成本](./docs/11-部署运维与成本.md)                       | 启动 · 备份 · 重置 · 成本   |
-| 12-a  | [需求 · 应用外壳与上下文](./docs/12-a-需求-应用外壳与上下文.md)          | A 类需求                   |
-| 12-b  | [需求 · 对话与编排](./docs/12-b-需求-对话与编排.md)                  | B 类需求                   |
-| 12-c  | [需求 · 工具技能与扩展](./docs/12-c-需求-工具技能与扩展.md)          | C 类需求                   |
-| 12-d  | [需求 · 记忆与配置](./docs/12-d-需求-记忆与配置.md)                  | D 类需求                   |
-| 12-e  | [需求 · 观测安全与验收](./docs/12-e-需求-观测安全与验收.md)          | E 类需求 + **需求总表**    |
-| 13    | [扩展指南](./docs/13-扩展指南.md)                                   | 怎么加需求 / 加模块 / 加工具 |
+回环地址上的本地模型可以直接用。指向云厂商元数据地址或链路本地地址会被拒绝。
 
-### 阅读顺序建议
+## 使用
 
-1. [01 需求与场景](./docs/01-需求与场景.md) —— 这个产品是什么
-2. [02 系统架构与目录](./docs/02-系统架构与目录.md) —— 怎么搭的
-3. [12-a ~ 12-e](./docs/12-a-需求-应用外壳与上下文.md) —— **要做什么**（28 条需求 + 验收标准）
-4. [03-b §B.5](./docs/03-b-技术栈-后端栈.md) —— **LangGraph 怎么用**（本项目的核心）
-5. [13 扩展指南](./docs/13-扩展指南.md) —— 往里加东西的规矩
+在聊天框里直接说人话即可，例如：
 
----
+- 「我桌面上有哪些文件？」
+- 「把 `notes.md` 里没做完的 TODO 列出来」
+- 「帮我跑一下测试」（会先弹出确认）
+- 「记住，我用 yarn 不用 npm」
 
-## 目录结构
+输入 `/` 会弹出斜杠命令。这些命令在服务端解析，不消耗模型 token：
+
+| 命令 | 作用 |
+| --- | --- |
+| `/help` | 列出全部命令 |
+| `/new` | 新建会话 |
+| `/reset` | 清空当前会话上下文（历史记录保留） |
+| `/model [名称]` | 查看或切换本会话模型 |
+| `/personality [文件名]` | 查看或切换人格文件 |
+| `/retry` | 重新生成上一轮回答 |
+| `/undo` | 撤销上一轮 |
+| `/compress` | 手动压缩当前会话 |
+| `/usage` | 本月与本会话的用量 |
+| `/memory` | 查看、删除或清空长期记忆 |
+| `/skills` | 列出已安装技能 |
+| `/thinking on\|off` | 思考模式开关 |
+| `/stop` | 停止当前输出 |
+
+命令行：
+
+| 命令 | 作用 |
+| --- | --- |
+| `yarn dev` | 前后端一起启动 |
+| `yarn memory:list` | 查看长期记忆 |
+| `yarn search <关键词>` | 跨会话检索 |
+| `yarn cron:list` | 查看定时任务 |
+| `yarn cost:report` | 用量报表 |
+| `yarn tool:logs` | 工具调用流水 |
+| `yarn backup` | 备份数据库和记忆文件 |
+
+## 内置工具
+
+| 工具 | 作用 |
+| --- | --- |
+| `read_file` / `write_file` / `list_dir` / `delete_path` / `search_files` | 工作区内的文件与目录 |
+| `shell` | 执行命令（可整体关闭） |
+| `http_request` / `web_fetch` | 发请求、抓网页 |
+| `web_search` | 联网搜索（需配置 `WEB_SEARCH_URL`） |
+| `browser` | Playwright 无头浏览器（需安装浏览器，可按域名白名单限制） |
+| `execute_code` | 在受限子进程里跑 JavaScript |
+| `current_time` | 当前时间 |
+| `memory` / `memory_forget` | 增改记忆；删除和清空会再确认一次 |
+| `spawn_subagent` | 把子任务派给看不到主对话的子代理 |
+
+技能自带的脚本和 MCP 暴露的工具会进同一个工具池。第三方工具默认每次都要确认。
+
+## 安全
+
+这个 Agent 能读盘、跑命令、出网。默认边界是：
+
+- 服务只听 `127.0.0.1`。改成 `0.0.0.0` 时，启动日志会打出告警：局域网里的人都能用它执行命令。
+- 文件路径会解析符号链接，必须落在工作区里。
+- 出网拒绝私网、回环和云元数据地址，重定向逐跳检查。
+- `rm -rf /`、`mkfs`、`shutdown` 这类命令直接拒绝。
+- 高敏感工具默认要人点确认。
+
+细节见 [安全方案](./docs/10-安全方案.md)。
+
+## 技术栈
+
+| 层 | 选型 |
+| --- | --- |
+| 运行时 | Node.js ≥ 22.4 · TypeScript · ESM |
+| 编排 | LangGraph.js |
+| 模型 | LangChain ChatModel（Anthropic / OpenAI 兼容端点） |
+| 后端 | Koa · Sequelize · SQLite（含 FTS5） |
+| 前端 | React 19 · Vite · Ant Design 6 |
+| 流式协议 | AI SDK UI Message Stream |
+| 测试 | Vitest · Playwright |
+
+## 开发
+
+```bash
+yarn run check     # 类型检查 + lint
+yarn test          # 单元测试与集成测试
+yarn test:e2e      # 首次需 npx playwright install chromium
+yarn migrate       # 跑数据库迁移
+yarn env:check     # 核对 .env 与 .env.example
+```
 
 ```
 atlas-agent/
-├── src/
-│   ├── agent/       ★ LangGraph 编排层（state / graph / nodes / checkpointer / events）
-│   ├── tools/       工具注册表 + 内置 / Skill / MCP 工具
-│   ├── skills/      技能包：发现 / 匹配 / 注入 / 脚本工具 / 自演化
-│   ├── services/    业务：会话 / 记忆 / 提示词 / 模型 / 成本 / 工具流水
-│   ├── gateway/     HTTP 路由
-│   ├── models/      Sequelize 模型
-│   ├── migrations/  umzug 迁移
-│   ├── lib/         工具库：安全闸 / 预算 / 埋点 / 路径沙箱
-│   └── server.ts    启动入口
-├── web/             前端（chat / sessions 两页 / components / layouts / lib）
-├── shared/          前后端共用类型
-├── data/            本地数据（⚠️ 不进 git）：atlas.db / prompts / memory / skills / workspace
-├── logs/            运行日志
-├── scripts/         migrate / backup / 清理测试残留
-├── tests/           unit / integration / e2e
-└── docs/            26 份规格文档
+├── src/            后端：编排、工具、技能、会话、记忆
+├── web/            前端：聊天页 / 历史会话页
+├── prompts/        系统提示词
+├── data/           本地数据（不进 git）：库、记忆、技能、MCP、定时任务
+├── scripts/        迁移、备份、记忆与定时任务命令
+├── tests/          unit / integration / e2e
+└── docs/           规格文档
 ```
 
----
-
-## 安全边界
-
-Agent 能读文件、跑命令、发请求 —— 这三件事都有闸：
-
-| 闸           | 规则                                                        |
-| ------------ | ----------------------------------------------------------- |
-| **路径沙箱** | 所有文件路径 resolve（含 symlink）后必须在工作区内           |
-| **出网校验** | 拒私网 / 回环 / 云元数据地址；**重定向逐跳校验**              |
-| **命令黑名单** | `rm -rf /` · `mkfs` · `dd if=` · `shutdown` 等直接拒绝         |
-| **默认确认** | `high` 档工具（Shell / 写文件 / MCP / Skill 脚本）**默认要人确认** |
-| **注入防护** | 工具结果标「不可信数据」；检测命中只告警 + 收紧档位，不直接拒答 |
-
-详见 [10 安全方案](./docs/10-安全方案.md)。
-
----
+规格文档从 [需求与场景](./docs/01-需求与场景.md) 和 [系统架构](./docs/02-系统架构与目录.md) 读起。给 AI 工程师看的操作说明在 [AGENTS.md](./AGENTS.md)。
 
 ## License
 
