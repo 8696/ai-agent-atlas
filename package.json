@@ -34,7 +34,6 @@
     "cost:report": "tsx scripts/cost-report.ts",
     "backup": "tsx scripts/backup.ts",
     "data:clean": "tsx scripts/clean-test-data.ts",
-    "seed": "tsx scripts/seed.ts",
     "env:sync": "tsx scripts/sync-env.ts",
     "env:check": "tsx scripts/sync-env.ts --check",
     "test": "vitest run --config vitest.config.ts --passWithNoTests",

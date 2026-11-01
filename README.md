@@ -202,7 +202,7 @@ atlas-agent/
 ├── shared/          前后端共用类型
 ├── data/            本地数据（⚠️ 不进 git）：atlas.db / prompts / memory / skills / workspace
 ├── logs/            运行日志
-├── scripts/         migrate / backup / seed
+├── scripts/         migrate / backup / 清理测试残留
 ├── tests/           unit / integration / e2e
 └── docs/            26 份规格文档
 ```

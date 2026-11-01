@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Input, Layout, Popconfirm, Tooltip } from 'antd';
 import type { InputRef } from 'antd';
 import {
@@ -7,13 +7,21 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   PlusOutlined,
+  RightOutlined,
   SearchOutlined,
   StarFilled,
   StarOutlined,
 } from '@ant-design/icons';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useSessionStore } from '../../lib/stores/sessionStore';
-import { formatRelative } from '../../lib/time';
+import {
+  formatRelative,
+  TIME_BUCKET_LABELS,
+  TIME_BUCKET_ORDER,
+  timeBucket,
+  type TimeBucket,
+} from '../../lib/time';
+import type { SessionSummary } from '../../lib/api';
 
 /**
  * 侧栏 —— **本期只有一组**（历史会话），没有「设置」组、没有「观测」组
@@ -28,6 +36,10 @@ import { formatRelative } from '../../lib/time';
 
 /** 搜索防抖（毫秒） */
 const SEARCH_DEBOUNCE_MS = 250;
+
+/** 侧栏宽度（展开 / 折叠）—— 与 [04-a §4.2](../docs/04-a-ui-总则布局与菜单.md) 规格一致 */
+const SIDER_WIDTH = 240;
+const SIDER_COLLAPSED_WIDTH = 64;
 
 export function Sidebar() {
   const navigate = useNavigate();
@@ -66,12 +78,18 @@ export function Sidebar() {
     };
   }, [searchText, query, setQuery]);
 
+  // 📌 **按最后活跃时间分桶** —— 一屏 20 条平铺很难看出「新旧」
+  const groups = useMemo(() => groupByTime(items), [items]);
+
   const goChat = (sessionId?: string) => {
     void navigate(sessionId ? `/chat?session=${sessionId}` : '/chat');
   };
 
   return (
     <Layout.Sider
+      className="atlas-sider"
+      width={SIDER_WIDTH}
+      collapsedWidth={SIDER_COLLAPSED_WIDTH}
       collapsed={collapsed}
       onCollapse={setCollapsed}
       breakpoint="lg"
@@ -105,6 +123,7 @@ export function Sidebar() {
 
         {collapsed ? null : (
           <>
+            {/* 📌 **搜索 + 收藏开关横排** —— 竖排太占竖向空间，列表才是主角 */}
             <div className="atlas-sider-tools">
               <Input
                 size="small"
@@ -115,15 +134,16 @@ export function Sidebar() {
                 value={searchText}
                 onChange={(event) => setSearchText(event.target.value)}
               />
-              <Button
-                size="small"
-                type={favoriteOnly ? 'primary' : 'default'}
-                icon={favoriteOnly ? <StarFilled /> : <StarOutlined />}
-                onClick={() => setFavoriteOnly(!favoriteOnly)}
-                aria-pressed={favoriteOnly}
-              >
-                只看收藏
-              </Button>
+              <Tooltip title={favoriteOnly ? '显示全部会话' : '只看收藏'}>
+                <Button
+                  size="small"
+                  type={favoriteOnly ? 'primary' : 'text'}
+                  icon={favoriteOnly ? <StarFilled /> : <StarOutlined />}
+                  onClick={() => setFavoriteOnly(!favoriteOnly)}
+                  aria-pressed={favoriteOnly}
+                  aria-label="只看收藏"
+                />
+              </Tooltip>
             </div>
 
             <div className="atlas-sider-section">
@@ -134,7 +154,8 @@ export function Sidebar() {
                   void navigate('/sessions');
                 }}
               >
-                历史会话
+                <span>历史会话</span>
+                <RightOutlined className="atlas-sider-section-arrow" aria-hidden />
               </button>
             </div>
           </>
@@ -148,19 +169,28 @@ export function Sidebar() {
               {query || favoriteOnly ? '没有匹配的会话' : '还没有会话，去聊一句吧'}
             </p>
           ) : (
-            items.map((item) => (
-              <SessionRow
-                key={item.id}
-                id={item.id}
-                title={item.title}
-                favorite={item.favorite}
-                active={item.id === currentSessionId}
-                time={formatRelative(item.lastActiveAt)}
-                onOpen={() => goChat(item.id)}
-                onToggleFavorite={() => void toggleFavorite(item.id)}
-                onRemove={() => void remove(item.id)}
-                onRename={(title) => rename(item.id, title)}
-              />
+            groups.map((group) => (
+              <section key={group.bucket} className="atlas-session-group">
+                <header className="atlas-session-group-head">
+                  <span className="atlas-session-group-label">{group.label}</span>
+                  <span className="atlas-session-group-count">{group.items.length}</span>
+                </header>
+                {group.items.map((item) => (
+                  <SessionRow
+                    key={item.id}
+                    id={item.id}
+                    title={item.title}
+                    favorite={item.favorite}
+                    active={item.id === currentSessionId}
+                    time={formatRelative(item.lastActiveAt)}
+                    messageCount={item.messageCount}
+                    onOpen={() => goChat(item.id)}
+                    onToggleFavorite={() => void toggleFavorite(item.id)}
+                    onRemove={() => void remove(item.id)}
+                    onRename={(title) => rename(item.id, title)}
+                  />
+                ))}
+              </section>
             ))
           )}
         </div>
@@ -180,13 +210,40 @@ export function Sidebar() {
   );
 }
 
-/** 会话行 —— **标题 + 相对时间；悬停显示「重命名 / 收藏 / 删除」** */
+/** 一组会话（同一个时间桶） */
+interface SessionGroup {
+  bucket: TimeBucket;
+  label: string;
+  items: SessionSummary[];
+}
+
+/**
+ * 按最后活跃时间分桶 —— **保持服务端给的顺序**（已按 `last_active_at` 倒序），
+ * 只把相邻的同桶会话归到一起。
+ */
+function groupByTime(items: SessionSummary[]): SessionGroup[] {
+  const buckets = new Map<TimeBucket, SessionSummary[]>();
+  for (const item of items) {
+    const bucket = timeBucket(item.lastActiveAt);
+    const list = buckets.get(bucket);
+    if (list) list.push(item);
+    else buckets.set(bucket, [item]);
+  }
+  return TIME_BUCKET_ORDER.filter((bucket) => buckets.has(bucket)).map((bucket) => ({
+    bucket,
+    label: TIME_BUCKET_LABELS[bucket],
+    items: buckets.get(bucket) ?? [],
+  }));
+}
+
+/** 会话行 —— **标题 + 元信息行；悬停浮出「重命名 / 收藏 / 删除」** */
 function SessionRow(props: {
   id: string;
   title: string;
   favorite: boolean;
   active: boolean;
   time: string;
+  messageCount: number;
   onOpen: () => void;
   onToggleFavorite: () => void;
   onRemove: () => void;
@@ -228,10 +285,14 @@ function SessionRow(props: {
       <button type="button" className="atlas-session-main" onClick={props.onOpen}>
         <span className="atlas-session-title">
           {props.favorite ? <StarFilled className="atlas-session-star" /> : null}
-          {props.title}
+          <span className="atlas-session-title-text">{props.title}</span>
         </span>
-        {props.time ? <span className="atlas-session-time">{props.time}</span> : null}
+        <span className="atlas-session-meta">
+          <span className="atlas-session-time">{props.time}</span>
+          <span className="atlas-session-count">{props.messageCount} 条消息</span>
+        </span>
       </button>
+      {/* 📌 **操作按钮浮在标题上方** —— 不再挤占标题宽度 */}
       <div className="atlas-session-actions">
         <Tooltip title="重命名">
           <Button

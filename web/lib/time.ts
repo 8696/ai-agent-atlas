@@ -50,3 +50,36 @@ function isSameDay(a: Date, b: Date): boolean {
     a.getDate() === b.getDate()
   );
 }
+
+/**
+ * 会话分组 —— 侧栏按「最后活跃时间」分桶（今天 / 昨天 / 最近 7 天 / 更早）。
+ *
+ * ⚠️ **只做归桶，不做排序** —— 顺序由服务端按 `last_active_at` 倒序给，
+ * 这里保持原顺序往前拼桶，不自己重排。
+ */
+export type TimeBucket = 'today' | 'yesterday' | 'week' | 'older';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function timeBucket(iso: string | null | undefined): TimeBucket {
+  if (!iso) return 'older';
+  const time = new Date(iso);
+  if (Number.isNaN(time.getTime())) return 'older';
+
+  const now = new Date();
+  if (isSameDay(time, now)) return 'today';
+  if (isSameDay(time, new Date(now.getTime() - DAY_MS))) return 'yesterday';
+  if (now.getTime() - time.getTime() < 7 * DAY_MS) return 'week';
+  return 'older';
+}
+
+/** 分组标题（顺序即展示顺序） */
+export const TIME_BUCKET_LABELS: Record<TimeBucket, string> = {
+  today: '今天',
+  yesterday: '昨天',
+  week: '最近 7 天',
+  older: '更早',
+};
+
+/** 分组的展示顺序 */
+export const TIME_BUCKET_ORDER: TimeBucket[] = ['today', 'yesterday', 'week', 'older'];
