@@ -33,6 +33,8 @@ interface RouteState {
   maxSteps?: number | undefined;
   /** 本轮已用掉的 token（**判单轮上限**） */
   turnTokens?: number | undefined;
+  /** token 上限（**子代理用自己的** —— 0 = 用全局的） */
+  maxTokens?: number | undefined;
 }
 
 /**
@@ -40,8 +42,13 @@ interface RouteState {
  *
  * ⚠️ **0 = 不限** —— 默认不擅自加限制（见 `.env` 的 `MAX_TOKENS_PER_TURN`）。
  */
-export function turnOverTokenLimit(state: { turnTokens?: number | undefined }): boolean {
-  const limit = config.MAX_TOKENS_PER_TURN;
+export function turnOverTokenLimit(state: {
+  turnTokens?: number | undefined;
+  maxTokens?: number | undefined;
+}): boolean {
+  // 📌 **子代理用自己的上限**（`SUBAGENT_MAX_TOKENS`）—— 0 = 用全局的
+  const limit =
+    state.maxTokens && state.maxTokens > 0 ? state.maxTokens : config.MAX_TOKENS_PER_TURN;
   if (limit <= 0) return false;
   return (state.turnTokens ?? 0) >= limit;
 }

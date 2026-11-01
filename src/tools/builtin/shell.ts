@@ -44,6 +44,27 @@ export const shellTool: ToolDefinition = {
     '输出过长会截断（保留尾部）。',
   schema: shellSchema,
   sensitivity: 'high',
+  keywords: [
+    '跑',
+    '运行',
+    '执行',
+    '命令',
+    '终端',
+    'shell',
+    'git',
+    'npm',
+    'yarn',
+    'pnpm',
+    '测试',
+    '构建',
+    'build',
+    '安装',
+    '装一下',
+    '起服务',
+    '启动服务',
+    'make',
+    'docker',
+  ],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -98,14 +119,18 @@ export const shellTool: ToolDefinition = {
       timedOut: boolean;
       spawnError?: string;
     }>((resolve) => {
-      const child = spawn(isWindows ? 'cmd' : '/bin/sh', isWindows ? ['/c', command] : ['-c', command], {
-        cwd,
-        // ⚠️ **环境变量走白名单** —— 不继承 `process.env`，
-        //    否则 `printenv LLM_API_KEY` 就能把密钥读出来
-        env: toolEnv({ ATLAS_SHELL: '1' }),
-        // ⚠️ **不给 stdin** —— 命令别等输入
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+      const child = spawn(
+        isWindows ? 'cmd' : '/bin/sh',
+        isWindows ? ['/c', command] : ['-c', command],
+        {
+          cwd,
+          // ⚠️ **环境变量走白名单** —— 不继承 `process.env`，
+          //    否则 `printenv LLM_API_KEY` 就能把密钥读出来
+          env: toolEnv({ ATLAS_SHELL: '1' }),
+          // ⚠️ **不给 stdin** —— 命令别等输入
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
 
       let stdout = '';
       let stderr = '';

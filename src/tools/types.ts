@@ -97,6 +97,30 @@ export interface ToolDefinition {
   enabled: boolean;
   /** 执行后端 */
   executor: ToolExecutor;
+  /**
+   * ⚠️ **触发关键词** —— 用户的话里出现这些词时，**这个工具必须留在工具池里**。
+   *
+   * 📌 **为什么需要它** —— 工具池按相关度裁剪时，
+   *    **高危工具只剩一两个名额**（低/普通档全留），
+   *    而中文查询与中文描述的相关度**噪声很大**：
+   *    「跑一下测试」会把 `execute_code` 排到 `shell` 前面
+   *    （「跑一」命中了「跑一段 JavaScript」，却匹配不上「执行一条 shell 命令」），
+   *    于是**模型根本看不见 `shell`** —— 表现就是「Agent 有时候突然不听话」。
+   *
+   * 📌 **命中即强制保留** —— 不参与名额竞争。
+   *    ASCII 关键词按**词边界**匹配（`ls` 不会命中 `list`）；
+   *    中文关键词按**子串**匹配。
+   */
+  keywords?: string[] | undefined;
+  /**
+   * ⚠️ **组合关键词** —— **每一组都要命中**（组内任一即可）才算强制保留。
+   *
+   * 📌 **给危险工具用** —— 光看「删」会把「把那条**记忆**删掉」也带出
+   *    `delete_path`（用户想删记忆，模型却看见了删文件的工具）。
+   *    所以 `delete_path` 要「删 **且** 文件」、
+   *    `memory_forget` 要「记忆 **且** 删/忘」。
+   */
+  keywordGroups?: string[][] | undefined;
   /** 实现 */
   invoke: (args: unknown, context: ToolContext) => Promise<ToolResult>;
 }

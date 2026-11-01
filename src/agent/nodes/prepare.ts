@@ -98,6 +98,8 @@ export async function prepareNode(state: {
     steps: 0,
     // 📌 **本轮 token 清零** —— 单轮上限按「这一轮」算
     turnTokens: 0,
+    // 📌 **「本轮剩下的都批准」清零** —— 它只在这一轮有效
+    approveAllRemaining: false,
     haltReason: null,
     notice: null,
     summary,

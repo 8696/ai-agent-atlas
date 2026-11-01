@@ -78,6 +78,7 @@ export const skillCreateTool: ToolDefinition = {
     '内容会先过一遍安全检查（有危险命令 / 提示词注入会被拒绝）。',
   schema: skillCreateSchema,
   sensitivity: 'normal',
+  keywords: ['存成技能', '记成技能', '做成技能', '沉淀', '技能', 'skill', '固化'],
   riskNote: '会在 data/skills/ 下新建一个技能目录（内容会先过安全检查）。',
   source: 'skill',
   enabled: true,
@@ -111,6 +112,7 @@ export const skillUpdateTool: ToolDefinition = {
     '只改正文，元信息（名字、触发条件）保持不变。',
   schema: skillUpdateSchema,
   sensitivity: 'normal',
+  keywords: ['改技能', '更新技能', '改进技能', '补充技能', '完善技能'],
   riskNote: '会覆盖 data/skills/<name>/SKILL.md 的正文（内容会先过安全检查）。',
   source: 'skill',
   enabled: true,
@@ -266,7 +268,11 @@ export async function runSkillScript(
   }
   if (isWindows) {
     command = 'cmd';
-    argv = ['/c', ...(interpreter ? [interpreter.command, ...interpreter.prefix, real] : [real]), ...args];
+    argv = [
+      '/c',
+      ...(interpreter ? [interpreter.command, ...interpreter.prefix, real] : [real]),
+      ...args,
+    ];
   }
 
   const timeoutMs = config.TOOL_TIMEOUT_MS;

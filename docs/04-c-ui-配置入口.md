@@ -128,7 +128,7 @@ LLM_MODEL=glm-5.3
 
 | 分组 | 配置项                                                                                                                                                            |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 通用 | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT` · `SESSION_RETENTION_DAYS` · `MAX_TOKENS_PER_TURN` · `SUBAGENT_MAX_DEPTH` |
+| 通用 | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT` · `SESSION_RETENTION_DAYS` · `MAX_TOKENS_PER_TURN` · `SUBAGENT_MAX_DEPTH` · `SUBAGENT_MAX_TOKENS` |
 | 模型 | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` · `LLM_FALLBACK_BASE_URL` · `LLM_FALLBACK_API_KEY` · `LLM_FALLBACK_MODEL` · `LLM_AUX_BASE_URL` · `LLM_AUX_API_KEY` · `LLM_AUX_MODEL` · `LLM_PROMPT_CACHE` · `LLM_TEMPERATURE` · `LLM_MAX_TOKENS` · `LLM_THINKING_BUDGET` · `MULTI_TOOL_CALLS` |
 | 记忆 | `MEMORY_ENABLED` · `MEMORY_RELEVANCE_ENABLED` · `MEMORY_TOP_K` · `MEMORY_TOKEN_BUDGET` · `MEMORY_MAX_CHARS` · `USER_MAX_CHARS` · `SUMMARY_ENABLED` · `SUMMARY_TOKEN_BUDGET` |
 | 成本 | `MONTHLY_TOKEN_BUDGET` · `COST_BUDGET_BLOCK` · `WARN_RATIO`                                                                                                        |
@@ -149,6 +149,7 @@ LLM_MODEL=glm-5.3
 > | `WEB_SEARCH_API_KEY` | 搜索后端的 Key（tavily / brave 用） |
 > | `MAX_TOKENS_PER_TURN` | **单轮 token 上限**（**0 = 不限**） |
 > | `SUBAGENT_MAX_DEPTH` | 子代理能再派几层（默认 2） |
+| `SUBAGENT_MAX_TOKENS` | 单个子代理的 token 上限（**0 = 不限**） |
 > 📌 **`SYSTEM_LANGUAGE` 管的是「Agent 回复用什么语言」**，不是界面语言
 > （界面文案是写死的中文，前端没有设置页）。
 

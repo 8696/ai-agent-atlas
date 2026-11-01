@@ -140,6 +140,7 @@ export const executeCodeTool: ToolDefinition = {
     '需要确认的工具（shell / 写文件 / 删除）请在主对话里直接调用。',
   schema: codeSchema,
   sensitivity: 'high',
+  keywords: ['沙箱', '脚本', '代码执行', 'javascript', '管线', '多步', '算一下', '计算'],
   riskNote:
     '会在受限子进程里执行你给的 JavaScript。脚本能通过 atlas.call() 调用其它工具' +
     '（但调不到需要确认的那些）。',

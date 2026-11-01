@@ -32,6 +32,7 @@ export function answerNode(
     haltReason: string | null;
     steps: number;
     turnTokens?: number | undefined;
+    maxTokens?: number | undefined;
     sessionId?: string | undefined;
     messageId?: string | undefined;
   },
@@ -49,14 +50,16 @@ export function answerNode(
   // ⚠️ **步数上限也要说清楚** —— 不能默默停下
   const stepLimitHit = (state.steps ?? 0) >= config.MAX_TOOL_STEPS;
   // ⚠️ **单轮 token 上限也要说清楚** —— 用户要知道为什么停了
-  const tokenLimitHit =
-    config.MAX_TOKENS_PER_TURN > 0 &&
-    (state.turnTokens ?? 0) >= config.MAX_TOKENS_PER_TURN;
+  const tokenLimit =
+    state.maxTokens && state.maxTokens > 0 ? state.maxTokens : config.MAX_TOKENS_PER_TURN;
+  const tokenLimitHit = tokenLimit > 0 && (state.turnTokens ?? 0) >= tokenLimit;
   const notice =
     state.notice ??
     state.haltReason ??
     (tokenLimitHit
-      ? `已达到单轮 token 上限（${config.MAX_TOKENS_PER_TURN}）—— 改 .env 的 MAX_TOKENS_PER_TURN 可以调`
+      ? `已达到单轮 token 上限（${tokenLimit}）—— 改 .env 的 ${
+          state.maxTokens && state.maxTokens > 0 ? 'SUBAGENT_MAX_TOKENS' : 'MAX_TOKENS_PER_TURN'
+        } 可以调`
       : stepLimitHit
         ? '已达到步数上限'
         : null);

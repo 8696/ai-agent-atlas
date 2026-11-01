@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Semaphore } from '../../src/agent/subagent-pool';
 import {
   canSpawnSubagent,
+  parseJsonObject,
   spawnSubagentTool,
   subagentThreadId,
 } from '../../src/agent/subagent';
@@ -89,5 +90,31 @@ describe('子代理工具', () => {
     const a = subagentThreadId('sess-1', 'call-1', 1);
     const b = subagentThreadId('sess-1', 'call-1', 2);
     expect(a).not.toBe(b);
+  });
+});
+
+describe('子代理的结构化产出', () => {
+  it('📌 纯 JSON → 解析出来', () => {
+    const parsed = parseJsonObject('{"summary":"结论","items":[1,2]}');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.value).toEqual({ summary: '结论', items: [1, 2] });
+  });
+
+  it('📌 包在代码块围栏里 → 也能解析', () => {
+    const parsed = parseJsonObject('```json\n{"summary":"结论"}\n```');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.value).toEqual({ summary: '结论' });
+  });
+
+  it('📌 JSON 前后有话 → 也能抠出来', () => {
+    const parsed = parseJsonObject('好的，结果如下：\n{"summary":"结论"}\n希望有用');
+    expect(parsed.ok).toBe(true);
+    expect(parsed.value).toEqual({ summary: '结论' });
+  });
+
+  it('⚠️ 不是 JSON → 如实说不行（不装成功）', () => {
+    expect(parseJsonObject('这是一段散文').ok).toBe(false);
+    expect(parseJsonObject('[1,2,3]').ok).toBe(false);
+    expect(parseJsonObject('').ok).toBe(false);
   });
 });

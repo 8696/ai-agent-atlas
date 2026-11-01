@@ -104,6 +104,17 @@ export const memoryTool: ToolDefinition = {
     '⚠️ 永久删除与清空用 memory_forget。',
   schema: memorySchema,
   sensitivity: 'normal',
+  keywords: [
+    '记住',
+    '记一下',
+    '记下',
+    '别忘了',
+    '我的偏好',
+    '我喜欢',
+    '我不喜欢',
+    '我习惯',
+    '我用的是',
+  ],
   source: 'builtin',
   enabled: config.MEMORY_ENABLED,
   // 📌 **子代理不碰记忆** —— 记忆是跟用户直接对话的事，
@@ -203,6 +214,10 @@ export const memoryForgetTool: ToolDefinition = {
     '⚠️ 只是想让某条记忆不再被召回（但仍想留着），用 memory 的 archive —— 它可恢复。',
   schema: forgetSchema,
   sensitivity: 'high',
+  keywordGroups: [
+    ['记忆', '偏好', '那条', '用户画像'],
+    ['删', '删除', '删掉', '清空', '忘', '别记了', '不要记'],
+  ],
   riskNote: '永久删除记忆 —— 删掉后无法恢复（确认后会立即执行）',
   source: 'builtin',
   enabled: config.MEMORY_ENABLED,

@@ -77,6 +77,11 @@ const confirmRequestSchema = z.object({
    * 后端核对不上就重新弹确认（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
    */
   fingerprint: z.string().optional(),
+  /**
+   * ⚠️ **「本轮剩下的都批准」**（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）——
+   * 用户点了「批准并放行本轮剩余的」才会带这个
+   */
+  approveAll: z.boolean().optional(),
 });
 
 export const chatRouter = new Router({ prefix: '/api/v1' });
@@ -387,7 +392,7 @@ chatRouter.post('/chat/confirm', async (ctx) => {
   if (!parsed.success) {
     throw new AppError('INVALID_REQUEST', '请求体格式不对', 400);
   }
-  const { sessionId, approved, fingerprint } = parsed.data;
+  const { sessionId, approved, fingerprint, approveAll } = parsed.data;
 
   const session = await findSession(sessionId);
   if (!session) {
@@ -395,7 +400,12 @@ chatRouter.post('/chat/confirm', async (ctx) => {
   }
 
   // 📌 **把指纹带回去** —— 后端核对「批准的是不是这一组参数」
-  const decision = { approved, ...(fingerprint ? { fingerprint } : {}) };
+  // 📌 **approveAll 也带回去** —— 「本轮剩下的都批准」
+  const decision = {
+    approved,
+    ...(fingerprint ? { fingerprint } : {}),
+    ...(approveAll ? { approveAll } : {}),
+  };
 
   // ── 路 1：有人在等 ──
   if (resolvePendingDecision(sessionId, decision)) {

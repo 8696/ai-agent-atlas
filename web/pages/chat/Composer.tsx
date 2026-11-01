@@ -110,7 +110,10 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
       }
     }
 
-    return out.slice(0, 12);
+    // 📌 **上限别卡太死** —— 命令已经 17 条了，卡在 12 的话
+    //    `/context` `/tools` `/export` 这些**根本补不出来**；
+    //    列表容器本身能滚（`max-height: 260px`），多条也放得下
+    return out.slice(0, 24);
   }, [commandPart, argPart, commands, personalities, models]);
 
   // 📌 **Esc 关掉列表** —— 关了之后输入不变就一直关着（再改输入才重开）

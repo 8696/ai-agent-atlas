@@ -39,21 +39,43 @@ export interface SearchBackend {
 }
 
 /**
- * 决定用哪个搜索后端。
+ * 决定用哪个搜索后端（**第一个**）。
  *
  * 📌 **`auto` 的判定顺序**：URL → Key → 免 key 兜底。
  */
 export function resolveSearchBackend(env = config): SearchBackend {
-  const explicit = env.WEB_SEARCH_PROVIDER;
-  if (explicit === 'searxng') return { provider: 'searxng', url: env.WEB_SEARCH_URL };
-  if (explicit === 'tavily') return { provider: 'tavily', apiKey: env.WEB_SEARCH_API_KEY };
-  if (explicit === 'brave') return { provider: 'brave', apiKey: env.WEB_SEARCH_API_KEY };
-  if (explicit === 'duckduckgo') return { provider: 'duckduckgo' };
+  return resolveSearchBackends(env)[0] as SearchBackend;
+}
 
-  // ── auto ──
-  if (env.WEB_SEARCH_URL) return { provider: 'searxng', url: env.WEB_SEARCH_URL };
-  if (env.WEB_SEARCH_API_KEY) return { provider: 'tavily', apiKey: env.WEB_SEARCH_API_KEY };
-  return { provider: 'duckduckgo' };
+/**
+ * 搜索后端的**降级链**（按顺序试）。
+ *
+ * 📌 **为什么要链** —— 单个后端会挂：自建的 SearXNG 停了、
+ *    商业 API 的 key 过期了、DuckDuckGo 改了页面结构。
+ *    一次失败就整个搜索不可用，体验很差。
+ *
+ * 📌 **兜底永远是 DuckDuckGo** —— 免 key、不用配，至少能搜
+ */
+export function resolveSearchBackends(env = config): SearchBackend[] {
+  const chain: SearchBackend[] = [];
+  const push = (backend: SearchBackend): void => {
+    if (!chain.some((item) => item.provider === backend.provider)) chain.push(backend);
+  };
+
+  const explicit = env.WEB_SEARCH_PROVIDER;
+  if (explicit === 'searxng') push({ provider: 'searxng', url: env.WEB_SEARCH_URL });
+  else if (explicit === 'tavily') push({ provider: 'tavily', apiKey: env.WEB_SEARCH_API_KEY });
+  else if (explicit === 'brave') push({ provider: 'brave', apiKey: env.WEB_SEARCH_API_KEY });
+  else if (explicit === 'duckduckgo') push({ provider: 'duckduckgo' });
+  else {
+    // ── auto ──
+    if (env.WEB_SEARCH_URL) push({ provider: 'searxng', url: env.WEB_SEARCH_URL });
+    if (env.WEB_SEARCH_API_KEY) push({ provider: 'tavily', apiKey: env.WEB_SEARCH_API_KEY });
+  }
+
+  // 📌 **兜底** —— 免 key 的 DuckDuckGo
+  push({ provider: 'duckduckgo' });
+  return chain;
 }
 
 /** 一条搜索结果 */
@@ -97,14 +119,14 @@ export function decodeEntities(text: string): string {
   for (const [entity, char] of Object.entries(named)) {
     out = out.split(entity).join(char);
   }
-  return out.replace(/&#(\d+);/g, (_match, code: string) =>
-    String.fromCodePoint(Number(code)),
-  );
+  return out.replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
 }
 
 /** 去掉标签 */
 function stripTags(html: string): string {
-  return decodeEntities(html.replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+  return decodeEntities(html.replace(/<[^>]+>/g, ''))
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 /**
@@ -115,7 +137,8 @@ function stripTags(html: string): string {
  */
 export function parseDuckDuckGoHtml(html: string): SearchHit[] {
   const links: Array<{ href: string; title: string }> = [];
-  const linkPattern = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  const linkPattern =
+    /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
   let match = linkPattern.exec(html);
   while (match !== null) {
     const href = match[1] ?? '';
@@ -258,9 +281,7 @@ async function searchBrave(
     title: typeof hit.title === 'string' ? hit.title : '(无标题)',
     url: typeof hit.url === 'string' ? hit.url : '',
     content:
-      typeof hit.description === 'string'
-        ? hit.description.replace(/\s+/g, ' ').slice(0, 300)
-        : '',
+      typeof hit.description === 'string' ? hit.description.replace(/\s+/g, ' ').slice(0, 300) : '',
   }));
 }
 
@@ -290,8 +311,8 @@ async function searchDuckDuckGo(query: string, limit: number): Promise<SearchHit
   return hits.slice(0, limit);
 }
 
-/** 按后端分派 */
-export async function runSearch(
+/** 按后端分派（**单个后端**） */
+async function runOne(
   backend: SearchBackend,
   query: string,
   limit: number,
@@ -310,21 +331,54 @@ export async function runSearch(
   }
 }
 
+/** 搜索结果（**带上是哪个后端出的**） */
+export interface SearchOutcome {
+  /** 命中 */
+  hits: SearchHit[];
+  /** 实际用的后端 */
+  backend: SearchProvider;
+}
+
+/**
+ * 按降级链依次试 —— **一个挂了就试下一个**。
+ *
+ * ⚠️ **全都失败才报错** —— 报错里带上每个后端各自的原因
+ */
+export async function runSearch(
+  backends: SearchBackend[],
+  query: string,
+  limit: number,
+): Promise<SearchOutcome> {
+  const errors: string[] = [];
+  for (const backend of backends) {
+    try {
+      const hits = await runOne(backend, query, limit);
+      return { hits, backend: backend.provider };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push(`${backend.provider}：${message}`);
+    }
+  }
+  throw new Error(`所有搜索后端都失败了 —— ${errors.join('；')}`);
+}
+
 /**
  * 联网搜索工具。
  *
  * 📌 **始终注册** —— 默认走免 key 的 DuckDuckGo；
  *    配了 SearXNG / Tavily / Brave 就走那个。
  */
-export function createWebSearchTool(backend: SearchBackend): ToolDefinition {
+export function createWebSearchTool(backends: SearchBackend[]): ToolDefinition {
+  const names = backends.map((backend) => backend.provider).join(' → ');
   return {
     name: 'web_search',
     description:
       '联网搜索。返回一个标题 + 链接 + 摘要的列表。' +
       '适合查「最新消息」「某个库怎么用」这类需要外部信息的问题。' +
-      `（当前后端：${backend.provider}）`,
+      `（后端：${names}；前一个失败会自动试下一个）`,
     schema: webSearchSchema,
     sensitivity: 'normal',
+    keywords: ['搜一下', '搜索', '查一下', '最新', '新闻', '资料', 'search', '查询'],
     source: 'builtin',
     enabled: true,
     executor: 'subagent',
@@ -332,7 +386,8 @@ export function createWebSearchTool(backend: SearchBackend): ToolDefinition {
       try {
         const input = parseArgs(webSearchSchema, args);
         const limit = input.limit ?? 5;
-        const hits = await runSearch(backend, input.query, limit);
+        const outcome = await runSearch(backends, input.query, limit);
+        const hits = outcome.hits;
 
         const lines = hits.map((hit, index) => {
           const snippet = hit.content.replace(/\s+/g, ' ').slice(0, 300);
@@ -341,10 +396,13 @@ export function createWebSearchTool(backend: SearchBackend): ToolDefinition {
 
         return {
           ok: true,
-          output: `搜索「${input.query}」的结果：\n${lines.join('\n') || '（没有结果）'}`,
+          output:
+            `搜索「${input.query}」的结果（后端：${outcome.backend}）：\n` +
+            `${lines.join('\n') || '（没有结果）'}`,
           data: {
             query: input.query,
             count: lines.length,
+            backend: outcome.backend,
             results: hits.map((hit) => ({ title: hit.title, url: hit.url })),
           },
         };
@@ -355,9 +413,9 @@ export function createWebSearchTool(backend: SearchBackend): ToolDefinition {
   };
 }
 
-/** 搜索工具组（**始终可用** —— 默认走免 key 的 DuckDuckGo） */
+/** 搜索工具组（**始终可用** —— 降级链的最后一个是免 key 的 DuckDuckGo） */
 export function searchTools(
-  backend: SearchBackend = resolveSearchBackend(),
+  backends: SearchBackend[] = resolveSearchBackends(),
 ): Array<{ source: 'builtin'; tools: ToolDefinition[] }> {
-  return [{ source: 'builtin', tools: [createWebSearchTool(backend)] }];
+  return [{ source: 'builtin', tools: [createWebSearchTool(backends)] }];
 }

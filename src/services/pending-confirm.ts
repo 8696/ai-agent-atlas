@@ -13,6 +13,13 @@ export interface PendingDecision {
   approved: boolean;
   /** 入参指纹 —— ⚠️ **参数变了就不能沿用旧的批准** */
   fingerprint?: string | undefined;
+  /**
+   * ⚠️ **「本轮剩下的都批准」** —— 用户点的是那个按钮。
+   *
+   * 📌 **只在这一轮有效** —— 标志记在图状态里，
+   *    下一轮的 `prepare` 会把它清掉。
+   */
+  approveAll?: boolean | undefined;
 }
 
 interface PendingEntry {

@@ -153,6 +153,14 @@ export const envSchema = z.object({
   /** 单个子代理的工具步数上限 */
   SUBAGENT_MAX_STEPS: z.coerce.number().int().positive().default(8),
   /**
+   * ⚠️ **单个子代理的 token 上限**（**0 = 不限**）——
+   * 子代理的花费**记在主会话的月度预算里**，
+   * 没有这道闸的话，几个并发子代理就能把一个月的预算烧光。
+   *
+   * 📌 **默认不限** —— 不擅自加限制；想要一道闸就设一个数。
+   */
+  SUBAGENT_MAX_TOKENS: z.coerce.number().int().nonnegative().default(0),
+  /**
    * ⚠️ **子代理能再派几层**（默认 2 —— 主代理 + 子代理 + 孙代理）。
    *
    * 📌 **1 = 只有主代理能派**（旧行为，防递归）；

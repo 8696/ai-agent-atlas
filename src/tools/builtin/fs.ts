@@ -1,9 +1,24 @@
-import { readdirSync, readFileSync, lstatSync, mkdirSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import {
+  readdirSync,
+  readFileSync,
+  lstatSync,
+  mkdirSync,
+  writeFileSync,
+  rmSync,
+  unlinkSync,
+} from 'node:fs';
 import type { Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { paths } from '../../config.js';
-import { SandboxError, assertNotWorkspaceRoot, resolveContextFile, resolveInWorkspace, resolveInWorkspaceKeepLink, toWorkspaceRelative } from '../../lib/security/sandbox.js';
+import {
+  SandboxError,
+  assertNotWorkspaceRoot,
+  resolveContextFile,
+  resolveInWorkspace,
+  resolveInWorkspaceKeepLink,
+  toWorkspaceRelative,
+} from '../../lib/security/sandbox.js';
 import { isProtectedContextFile } from '../../lib/security/context-files.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
@@ -63,6 +78,7 @@ export const readFileTool: ToolDefinition = {
     '`AGENTS.md` / `SOUL.md` 也能读 —— 系统提示词里只带了前一截，要看全文就用这个。',
   schema: readFileSchema,
   sensitivity: 'normal',
+  keywords: ['读文件', '读取', '读一下', '看看文件', '打开文件', '看一下文件', 'cat', 'read'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -125,6 +141,23 @@ export const writeFileTool: ToolDefinition = {
     '人格、项目指令和提示词文件只读，不能写。',
   schema: writeFileSchema,
   sensitivity: 'high',
+  keywordGroups: [
+    [
+      '写',
+      '写入',
+      '写进',
+      '存',
+      '保存',
+      '改成',
+      '改一下',
+      '生成文件',
+      '新建文件',
+      '覆盖',
+      'write',
+      'save',
+    ],
+    ['文件', '代码', '内容', 'readme', 'md', '配置', '脚本', 'json', 'yaml', 'yml'],
+  ],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -176,6 +209,7 @@ export const listDirTool: ToolDefinition = {
     '路径相对项目根。不传 path 就是项目根。技能在 `data/skills`。',
   schema: listDirSchema,
   sensitivity: 'low',
+  keywords: ['列目录', '列出', '目录', 'ls', '看看有什么', '有什么文件', '文件夹'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -228,6 +262,10 @@ export const deletePathTool: ToolDefinition = {
     '项目根目录不能删；人格、项目指令和提示词文件不能删；软链只删链接本身，不删它指向的东西。',
   schema: deletePathSchema,
   sensitivity: 'high',
+  keywordGroups: [
+    ['删', '删除', '删掉', '清理', '移除', 'rm', 'delete', 'purge'],
+    ['文件', '目录', '文件夹', '路径', 'tmp', '临时', 'data'],
+  ],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -286,6 +324,7 @@ export const searchFilesTool: ToolDefinition = {
     '路径相对项目根。默认跳过 node_modules / .git / dist 这些目录。',
   schema: searchFilesSchema,
   sensitivity: 'low',
+  keywords: ['搜文件', '搜索文件', '查找文件', '在项目里找', 'grep', 'find', '全文搜'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',

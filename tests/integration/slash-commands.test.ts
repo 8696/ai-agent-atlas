@@ -195,6 +195,29 @@ describe('斜杠命令（[12-b B9](../docs/12-b-需求-对话与编排.md)）', 
     expect(modelCalls).toBe(0);
   });
 
+  it('/tools → 工具总览（来源 · 敏感档 · 要不要确认）', async () => {
+    const sessionId = await createSession();
+    modelCalls = 0;
+
+    const { text } = await sendCommand(sessionId, '/tools');
+
+    expect(text).toContain('工具总览');
+    expect(text).toContain('shell');
+    expect(text).toContain('高危');
+    // 📌 **敏感档与「要不要确认」都要说清楚**
+    expect(text).toContain('要确认');
+    expect(modelCalls).toBe(0);
+  });
+
+  it('/tools <名字> → 单个工具的详情', async () => {
+    const sessionId = await createSession();
+    const { text } = await sendCommand(sessionId, '/tools shell');
+
+    expect(text).toContain('shell');
+    expect(text).toContain('敏感档');
+    expect(text).toContain('参数');
+  });
+
   it('/context <问题> → 额外算出动态段（记忆 / 技能 / 检索命中）', async () => {
     const sessionId = await createSession();
     modelCalls = 0;

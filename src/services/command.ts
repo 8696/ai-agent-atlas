@@ -20,6 +20,7 @@ import type { MemoryFile } from './memory/types.js';
 import { compressSession, loadSessionMessages } from './session-summary.js';
 import { buildContextReport, renderContextReport } from './context-report.js';
 import { describeCronTask, loadCronTasks } from './cron/store.js';
+import { listToolSummaries, renderToolReport } from './tool-report.js';
 import { exportSession } from './session-export.js';
 import {
   createSession,
@@ -64,6 +65,11 @@ export const COMMANDS: CommandSpec[] = [
   { name: 'memory', usage: '/memory [list|delete|clear]', summary: '查看长期记忆；删条目（/memory delete USER 名字）或清空（/memory clear USER）' },
   { name: 'skills', usage: '/skills', summary: '列出已安装技能' },
   { name: 'cron', usage: '/cron', summary: '列出定时任务' },
+  {
+    name: 'tools',
+    usage: '/tools [工具名]',
+    summary: '列出所有工具（来源 · 敏感档 · 要不要确认）；带名字看单个工具',
+  },
   {
     name: 'export',
     usage: '/export [md|json]',
@@ -542,6 +548,15 @@ export async function runCommand(
                 ].join('\n')
               : '还没有安装任何技能（把技能目录拷进 `data/skills/` 即可）。',
           data: { command: 'skills', skills },
+          action: 'none',
+        };
+      }
+
+      case 'tools': {
+        const text = renderToolReport(parsed.args || undefined);
+        return {
+          text,
+          data: { command: 'tools', count: listToolSummaries().length },
           action: 'none',
         };
       }

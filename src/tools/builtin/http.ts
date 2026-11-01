@@ -40,6 +40,7 @@ export const httpRequestTool: ToolDefinition = {
     '返回状态码、响应头与正文（正文过长会截断）。',
   schema: httpRequestSchema,
   sensitivity: 'normal',
+  keywords: ['http', '接口', 'api', '请求', 'webhook', 'post', 'put'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',
@@ -96,10 +97,11 @@ export function htmlToText(html: string): string {
   for (const [entity, char] of Object.entries(entities)) {
     text = text.split(entity).join(char);
   }
-  text = text.replace(/&#(\d+);/g, (_match, code: string) =>
-    String.fromCodePoint(Number(code)),
-  );
-  return text.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  text = text.replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)));
+  return text
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 /** `web_fetch` —— 抓网页转纯文本 */
@@ -115,6 +117,7 @@ export const webFetchTool: ToolDefinition = {
     '只支持 http / https；内网与云元数据地址会被拒绝。',
   schema: webFetchSchema,
   sensitivity: 'normal',
+  keywords: ['抓网页', '抓取', '网页内容', '这个链接', '这个页面', 'fetch', '正文'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',

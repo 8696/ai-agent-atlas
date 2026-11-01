@@ -209,11 +209,17 @@ function postConfirm(
   sessionId: string,
   approved: boolean,
   fingerprint?: string,
+  approveAll?: boolean,
 ): Promise<Response> {
   return fetch(`${baseUrl}/api/v1/chat/confirm`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, approved, ...(fingerprint ? { fingerprint } : {}) }),
+    body: JSON.stringify({
+      sessionId,
+      approved,
+      ...(fingerprint ? { fingerprint } : {}),
+      ...(approveAll ? { approveAll } : {}),
+    }),
   });
 }
 
@@ -460,6 +466,36 @@ describe('人工确认闸（[12-b B5](../docs/12-b-需求-对话与编排.md)）
       .map((chunk) => chunk['delta'])
       .join('');
     expect(text).toBe('两个都跑完了');
+  });
+
+  it('📌 批准并放行本轮剩余的 → 只弹一次确认，两个工具都跑', async () => {
+    const sessionId = await createSession();
+    script = [
+      { tool: { name: 'danger_tool', args: { value: 'x' } } },
+      { tool: { name: 'danger_tool', args: { value: 'y' } } },
+      { text: '两个都跑完了' },
+    ];
+
+    const response = await postChat(sessionId, '跑两次 danger_tool');
+    const chunks: Chunk[] = [];
+    const iterator = readChunks(response)[Symbol.asyncIterator]();
+    let confirms = 0;
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) break;
+      const chunk = next.value;
+      chunks.push(chunk);
+      if (chunk.type === 'data-pending-confirm') {
+        confirms += 1;
+        // 📌 **第一次就批「本轮剩下的都批准」** —— 后面那个危险工具不该再问
+        await postConfirm(sessionId, true, fingerprintOf(chunk), true);
+      }
+    }
+
+    // ⚠️ **只弹了一次**
+    expect(confirms).toBe(1);
+    // ⚠️ **两个工具都执行了**
+    expect(executed).toEqual(['danger_tool', 'danger_tool']);
   });
 
   it('⚠️ 被拒绝过的调用不会再来一遍（不追问第二次）', async () => {

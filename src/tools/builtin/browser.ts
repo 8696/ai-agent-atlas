@@ -171,9 +171,7 @@ export async function assertBrowserUrlAllowedAsync(
   for (const address of addresses) {
     const kind = classifyEndpointHost(address);
     if (kind === 'blocked') {
-      throw new Error(
-        `拒绝访问「${hostname}」—— 它解析到云元数据 / 链路本地地址（${address}）`,
-      );
+      throw new Error(`拒绝访问「${hostname}」—— 它解析到云元数据 / 链路本地地址（${address}）`);
     }
     if (allowlist.length > 0 && (kind === 'private' || kind === 'loopback')) {
       throw new Error(
@@ -240,20 +238,23 @@ async function ensurePage(): Promise<{
       route: (pattern: string, handler: unknown) => Promise<void>;
     };
     // 📌 **每个请求都过一遍白名单** —— 重定向、子资源一样拦
-    await context.route('**/*', async (route: {
-      request: () => { url: () => string };
-      continue: () => Promise<void>;
-      abort: (reason: string) => Promise<void>;
-    }) => {
-      const url = route.request().url();
-      try {
-        // ⚠️ **每个请求都过一遍** —— 而且**要解析 DNS**（不止查字符串）
-        await assertBrowserUrlAllowedAsync(url);
-        await route.continue();
-      } catch {
-        await route.abort('blockedbyclient');
-      }
-    });
+    await context.route(
+      '**/*',
+      async (route: {
+        request: () => { url: () => string };
+        continue: () => Promise<void>;
+        abort: (reason: string) => Promise<void>;
+      }) => {
+        const url = route.request().url();
+        try {
+          // ⚠️ **每个请求都过一遍** —— 而且**要解析 DNS**（不止查字符串）
+          await assertBrowserUrlAllowedAsync(url);
+          await route.continue();
+        } catch {
+          await route.abort('blockedbyclient');
+        }
+      },
+    );
   }
 
   const context = contextInstance as {
@@ -277,6 +278,10 @@ export const browserTool: ToolDefinition = {
     '打开网页能拿到 JavaScript 渲染后的内容，读不到就先用 navigate。',
   schema: browserSchema,
   sensitivity: 'high',
+  keywordGroups: [
+    ['打开', '访问', '浏览', '截图', '登录', 'browser'],
+    ['网址', '网站', '网页', '页面', 'example.com', 'http', '登录', '截图', '浏览器'],
+  ],
   riskNote: '会启动无头浏览器访问网页并操作页面 —— 点击与输入都算实际操作。',
   source: 'builtin',
   enabled: true,
@@ -304,7 +309,11 @@ export const browserTool: ToolDefinition = {
         case 'click': {
           if (!input.selector) return { ok: false, output: 'click 动作需要 selector 参数' };
           await page.click(input.selector, { timeout });
-          return { ok: true, output: `已点击「${input.selector}」`, data: { selector: input.selector } };
+          return {
+            ok: true,
+            output: `已点击「${input.selector}」`,
+            data: { selector: input.selector },
+          };
         }
 
         case 'type': {
@@ -325,7 +334,9 @@ export const browserTool: ToolDefinition = {
             ok: true,
             output: clipped.text || '（页面正文是空的）',
             data: { url: page.url(), length: text.length },
-            ...(clipped.truncated ? { truncated: true, originalLength: clipped.originalLength } : {}),
+            ...(clipped.truncated
+              ? { truncated: true, originalLength: clipped.originalLength }
+              : {}),
           };
         }
 

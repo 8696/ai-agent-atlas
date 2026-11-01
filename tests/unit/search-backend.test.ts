@@ -3,6 +3,7 @@ import {
   decodeEntities,
   parseDuckDuckGoHtml,
   resolveSearchBackend,
+  resolveSearchBackends,
 } from '../../src/tools/builtin/search';
 import type { Env } from '../../src/config/schema';
 
@@ -59,6 +60,48 @@ describe('搜索后端判定', () => {
       }),
     );
     expect(backend.provider).toBe('brave');
+  });
+});
+
+describe('搜索后端的降级链', () => {
+  it('⚠️ 什么都没配 → 链上只有 duckduckgo', () => {
+    const chain = resolveSearchBackends(
+      envOf({ WEB_SEARCH_PROVIDER: 'auto', WEB_SEARCH_URL: undefined, WEB_SEARCH_API_KEY: undefined }),
+    );
+    expect(chain.map((item) => item.provider)).toEqual(['duckduckgo']);
+  });
+
+  it('⚠️ 配了 URL → searxng 在前，duckduckgo 兜底', () => {
+    const chain = resolveSearchBackends(
+      envOf({
+        WEB_SEARCH_PROVIDER: 'auto',
+        WEB_SEARCH_URL: 'http://127.0.0.1:8888/search',
+        WEB_SEARCH_API_KEY: undefined,
+      }),
+    );
+    expect(chain.map((item) => item.provider)).toEqual(['searxng', 'duckduckgo']);
+  });
+
+  it('⚠️ 显式指定 → 它在前，duckduckgo 兜底', () => {
+    const chain = resolveSearchBackends(
+      envOf({
+        WEB_SEARCH_PROVIDER: 'brave',
+        WEB_SEARCH_URL: undefined,
+        WEB_SEARCH_API_KEY: 'key-1',
+      }),
+    );
+    expect(chain.map((item) => item.provider)).toEqual(['brave', 'duckduckgo']);
+  });
+
+  it('⚠️ 显式指定 duckduckgo → 链上就一个（不重复）', () => {
+    const chain = resolveSearchBackends(
+      envOf({
+        WEB_SEARCH_PROVIDER: 'duckduckgo',
+        WEB_SEARCH_URL: 'http://127.0.0.1:8888/search',
+        WEB_SEARCH_API_KEY: undefined,
+      }),
+    );
+    expect(chain.map((item) => item.provider)).toEqual(['duckduckgo']);
   });
 });
 

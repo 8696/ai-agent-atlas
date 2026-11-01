@@ -69,6 +69,14 @@ const spawnSchema = z.object({
   name: schemas.text(64).optional(),
   /** 模型（**可选** —— 默认继承主模型；只认主模型与备用模型） */
   model: schemas.text(64).optional(),
+  /**
+   * ⚠️ **子代理的产出格式** —— `text`（默认）· `json`。
+   *
+   * 📌 **为什么要有 json** —— 「并行调研 A/B/C → 汇总」这种活，
+   *    纯文本摘要**很难合并**（每个子代理的措辞都不一样）；
+   *    让它们各返回一个 JSON 对象，主 Agent 就能逐字段地并。
+   */
+  output: z.enum(['text', 'json']).optional(),
 });
 
 /**
@@ -158,6 +166,13 @@ export interface SubagentResult {
   steps: number;
   /** 摘要被截断了 */
   truncated: boolean;
+  /**
+   * 📌 **结构化产出**（`output: 'json'` 且解析成功时才有）——
+   * 主 Agent 拿它逐字段合并，不用去啃散文
+   */
+  structured?: unknown;
+  /** 要了 JSON 但没解析出来（**如实说，不装成功**） */
+  parseFailed?: boolean;
 }
 
 /**
@@ -177,21 +192,36 @@ export async function runSubagent(options: {
   signal?: AbortSignal | undefined;
   /** ⚠️ **这一层是第几层**（1 = 子代理 · 2 = 孙代理） */
   depth?: number | undefined;
+  /** 产出格式（`json` = 要一个 JSON 对象） */
+  output?: 'text' | 'json' | undefined;
 }): Promise<SubagentResult> {
   const graph = getGraph();
+  // 📌 **要 JSON 就把格式要求写进任务** ——
+  //    子代理看到的任务就是主 Agent 给的那段，
+  //    不额外说明的话它会回一段散文，主 Agent 没法合并
+  const task =
+    options.output === 'json'
+      ? `${options.task}\n\n` +
+        '【输出格式】只返回一个 JSON 对象，不要代码块围栏、不要额外的说明文字。' +
+        '形状自定，但必须包含一个 summary 字段（字符串，一句话结论），' +
+        '其余字段按你的任务需要来（例如 findings 数组、data 对象）。'
+      : options.task;
   // 📌 **子代理的消息 id 带前缀** —— 工具流水里能一眼看出
   //    「这几条是子代理跑的」（见 [12-c C6](./docs/12-c-需求-工具技能与扩展.md)）
   const messageId = `subagent:${nanoid()}`;
 
   const stream = (await graph.stream(
     {
-      turnMessages: [new HumanMessage(options.task)],
+      turnMessages: [new HumanMessage(task)],
       sessionId: options.sessionId ?? '',
       messageId,
       // ⚠️ **隔离** —— 子代理不加载主对话的历史与摘要
       isolated: true,
       // 📌 **子代理自己的步数上限**
       maxSteps: config.SUBAGENT_MAX_STEPS,
+      // ⚠️ **子代理自己的 token 上限** —— 它的花费记在主会话的预算里
+      //    （`SUBAGENT_MAX_TOKENS`，0 = 不限）
+      maxTokens: config.SUBAGENT_MAX_TOKENS,
       // 📌 **深度** —— 这一层还能不能继续派（见 `SUBAGENT_MAX_DEPTH`）
       depth: options.depth ?? 1,
       // 📌 **子代理可以指定模型**（默认继承主模型）
@@ -213,21 +243,76 @@ export async function runSubagent(options: {
 
   let text = '';
   let steps = 0;
+  let notice = '';
   for await (const chunk of stream) {
     const [mode, payload] = chunk as [string, unknown];
     if (mode !== 'values') continue;
-    const value = (payload ?? {}) as { finalText?: unknown; steps?: unknown };
+    const value = (payload ?? {}) as {
+      finalText?: unknown;
+      steps?: unknown;
+      notice?: unknown;
+    };
     if (typeof value.finalText === 'string') text = value.finalText;
     if (typeof value.steps === 'number') steps = value.steps;
+    if (typeof value.notice === 'string') notice = value.notice;
   }
 
+  // 📌 **子代理提前收尾要说清楚** —— 主 Agent 得知道「它是被上限截断的」
+  //    不然会把半截结果当成完整结论
+  if (notice) text = text ? `${text}\n\n（⚠️ ${notice}）` : `（⚠️ ${notice}）`;
+
   const clipped = truncateOutput(text, SUMMARY_MAX_CHARS, config.TOOL_OUTPUT_TRUNCATE);
+
+  // ── 结构化产出（要了 JSON 才解析） ──
+  let structured: unknown;
+  let parseFailed = false;
+  if (options.output === 'json') {
+    const parsed = parseJsonObject(text);
+    if (parsed.ok) {
+      structured = parsed.value;
+    } else {
+      // ⚠️ **解析不出来要如实说** —— 不能把一段散文当成结构化结果
+      parseFailed = true;
+    }
+  }
+
   return {
     name: options.name,
     summary: clipped.text,
     steps,
     truncated: clipped.truncated,
+    ...(structured !== undefined ? { structured } : {}),
+    ...(parseFailed ? { parseFailed } : {}),
   };
+}
+
+/**
+ * 从子代理的正文里抠出 JSON 对象。
+ *
+ * ⚠️ **容忍代码块围栏** —— 模型很爱把 JSON 包在 ```json 里。
+ */
+export function parseJsonObject(text: string): { ok: boolean; value?: unknown } {
+  const trimmed = text.trim();
+  const candidates = [trimmed];
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) candidates.unshift(fenced[1].trim());
+  // 📌 **截取第一个 `{` 到最后一个 `}`** —— 模型常在 JSON 前后加话
+  const start = trimmed.indexOf('{');
+  const end = trimmed.lastIndexOf('}');
+  if (start >= 0 && end > start) candidates.push(trimmed.slice(start, end + 1));
+
+  for (const candidate of candidates) {
+    if (!candidate || !candidate.includes('{')) continue;
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return { ok: true, value: parsed };
+      }
+    } catch {
+      // 不是合法 JSON —— 试下一个候选
+    }
+  }
+  return { ok: false };
 }
 
 /**
@@ -242,9 +327,11 @@ export const spawnSubagentTool: ToolDefinition = {
     '把一个子任务派给**隔离上下文的子代理**并行执行。' +
     '子代理只看得见你给的这段任务，看不见主对话的历史；' +
     '它能用同一套工具（危险操作照样要人确认），跑完只回一段摘要。' +
-    '适合「同时查 A 和 B 两件事」这种能拆开的活。',
+    '适合「同时查 A 和 B 两件事」这种能拆开的活。' +
+    'output=json 时子代理会回一个 JSON 对象，主 Agent 能逐字段合并。',
   schema: spawnSchema,
   sensitivity: 'normal',
+  keywords: ['子代理', '并行', '同时', '分头', '拆开', '派', '委派', 'subagent'],
   riskNote: '会派一个子代理去跑这个子任务 —— 它能用同一套工具，但看不到主对话的历史。',
   source: 'builtin',
   enabled: true,
@@ -270,6 +357,8 @@ export const spawnSubagentTool: ToolDefinition = {
           summary: memo.summary,
           steps: memo.steps,
           truncated: memo.truncated,
+          ...(memo.structured !== undefined ? { structured: memo.structured } : {}),
+          ...(memo.parseFailed ? { parseFailed: true } : {}),
         },
       };
     }
@@ -290,16 +379,14 @@ export const spawnSubagentTool: ToolDefinition = {
         threadId,
         // 📌 **深度 +1** —— 这一层是子代理，它自己还能不能派由 `SUBAGENT_MAX_DEPTH` 判
         depth: depth + 1,
+        ...(input.output ? { output: input.output } : {}),
         ...(context.sessionId ? { sessionId: context.sessionId } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
       });
       rememberSubagent(threadId, result);
 
-      logger.info(
-        { subagent: name, steps: result.steps, threadId },
-        '子代理跑完了',
-      );
+      logger.info({ subagent: name, steps: result.steps, threadId }, '子代理跑完了');
 
       return {
         ok: true,
@@ -310,6 +397,9 @@ export const spawnSubagentTool: ToolDefinition = {
           summary: result.summary,
           steps: result.steps,
           truncated: result.truncated,
+          // 📌 **结构化产出** —— 要了 json 就给主 Agent 一个能合并的对象
+          ...(result.structured !== undefined ? { structured: result.structured } : {}),
+          ...(result.parseFailed ? { parseFailed: true } : {}),
         },
       };
     } finally {

@@ -57,6 +57,11 @@ export interface ToolExecutionOutcome {
   status: 'success' | 'error' | 'rejected';
   /** 这次调用要不要人确认 */
   requiresConfirmation: boolean;
+  /**
+   * ⚠️ **用户批准的是「本轮剩下的都批准」** ——
+   * 工具节点据此把标志写进图状态，后面的危险工具就不再逐个问
+   */
+  approveAll?: boolean;
 }
 
 /** 恢复值（**用户点了批准 / 取消**） */
@@ -64,6 +69,8 @@ export interface ToolResumeValue {
   approved: boolean;
   /** 入参指纹 —— ⚠️ **参数变了就不能沿用旧的批准** */
   fingerprint?: string;
+  /** ⚠️ **「本轮剩下的都批准」** —— 用户点的是那个按钮 */
+  approveAll?: boolean;
 }
 
 /** 稳定序列化（**键排序** —— 同样的入参要算出同样的指纹） */
@@ -104,6 +111,13 @@ export interface RunToolCallOptions {
   signal?: AbortSignal | undefined;
   /** 已被用户拒绝过的调用（**指纹集合**） */
   rejected?: ReadonlySet<string>;
+  /**
+   * ⚠️ **本轮已经批准过「剩下的都批准」** —— 直接放行，不再弹确认
+   *
+   * 📌 **标志来自图状态** —— 每轮开头（`prepare`）清零，
+   *    所以它**只在这一轮有效**（见 [12-b B5](./docs/12-b-需求-对话与编排.md)）。
+   */
+  approveAllRemaining?: boolean | undefined;
   /** ⚠️ **当前是第几层代理**（0 = 主代理）—— 传给工具 */
   depth?: number | undefined;
   /**
@@ -246,6 +260,8 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
 
   // ── 人工确认闸 ──
   let requiresConfirmation = false;
+  // 📌 **用户批的是「本轮剩下的都批准」吗** —— 是的话后面就不用逐个问了
+  let batchApproved = false;
   // 📌 **自动放行名单**（无人值守场景 —— 定时任务显式声明的）
   //    ⚠️ **只放行「await」** —— 被硬禁（blocked）的不受影响
   const autoApproved = options.autoApprove?.has(tool.name) === true;
@@ -255,6 +271,17 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       '工具在自动放行名单里 —— 跳过人工确认',
     );
     await writeAudit('TOOL_AUTO_APPROVED', 'tool', tool.name, {
+      sessionId: options.sessionId,
+      toolCallId: call.id,
+    });
+  } else if (options.approveAllRemaining === true) {
+    // 📌 **本轮已批准过「剩下的都批准」** —— 直接放行，不再逐个问
+    //    ⚠️ **审计要留痕** —— 这条路跳过了确认闸
+    logger.info(
+      { tool: tool.name, sessionId: options.sessionId },
+      '本轮已批准「剩下的都批准」—— 跳过人工确认',
+    );
+    await writeAudit('TOOL_BATCH_APPROVED', 'tool', tool.name, {
       sessionId: options.sessionId,
       toolCallId: call.id,
     });
@@ -303,6 +330,8 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       const why = resume.fingerprint ? '参数已变化' : '批准没有带上参数指纹';
       interrupt({ ...payload, risk: `${riskOf(tool, effectiveSensitivity)}（${why}，需要重新确认）` });
     }
+    // 📌 **「本轮剩下的都批准」** —— 记下来，后面的危险工具就不再逐个问
+    batchApproved = resume.approveAll === true;
   }
 
   // ── 真正执行 ──
@@ -408,6 +437,7 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
     //    （检查点 `graph_checkpoints` / 消息表 / parts 都从这一份出去，
     //    工具结果一旦带密钥就会**一路明文落库**）
     content: markUntrusted(maskString(clipped.text), tool.name),
+    ...(batchApproved ? { approveAll: true } : {}),
     card: {
       ...card,
       status: ok ? 'success' : 'error',

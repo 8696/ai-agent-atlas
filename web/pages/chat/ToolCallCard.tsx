@@ -173,7 +173,7 @@ interface PendingConfirmCardProps {
    * 📌 **带上入参指纹** —— 后端拿它核对「批准的是不是这一组参数」，
    * 对不上就重新弹确认（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
    */
-  onConfirm: (approved: boolean, fingerprint: string) => void;
+  onConfirm: (approved: boolean, fingerprint: string, approveAll?: boolean) => void;
   /** 处理中（**点了之后要禁用按钮**） */
   busy?: boolean;
   /**
@@ -217,6 +217,14 @@ export function PendingConfirmCard({
             icon={<CheckCircleOutlined />}
           >
             批准
+          </Button>
+          {/* ⚠️ **「本轮剩下的都批准」** —— 一轮里多个危险工具时不用点好几次 */}
+          <Button
+            size="small"
+            disabled={busy}
+            onClick={() => onConfirm(true, payload.fingerprint, true)}
+          >
+            批准并放行本轮剩余的
           </Button>
           <Button size="small" disabled={busy} onClick={() => onConfirm(false, payload.fingerprint)}>
             取消

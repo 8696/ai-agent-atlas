@@ -38,6 +38,8 @@ interface ToolNodeState {
   injectionMatches?: string[] | undefined;
   /** ⚠️ **当前是第几层代理**（0 = 主代理）—— 传给工具，判「还能不能再派」 */
   depth?: number | undefined;
+  /** ⚠️ **本轮已批准「剩下的都批准」** —— 危险工具不再逐个问 */
+  approveAllRemaining?: boolean | undefined;
 }
 
 /**
@@ -175,6 +177,8 @@ export async function toolsNode(
           autoApprove: new Set(state.autoApprove ?? []),
           // 📌 **深度** —— 子代理靠它判断自己还能不能再派一层
           depth: state.depth ?? 0,
+          // 📌 **本轮已批准「剩下的都批准」**
+          approveAllRemaining: state.approveAllRemaining ?? false,
           // 📌 **注入命中 → 权限闸升档**
           injection: injectionOf(state.injectionMatches),
           emit: (card: ToolCard) => {
@@ -216,6 +220,8 @@ export async function toolsNode(
     autoApprove: new Set(state.autoApprove ?? []),
     // 📌 **深度** —— 子代理靠它判断自己还能不能再派一层
     depth: state.depth ?? 0,
+    // 📌 **本轮已批准「剩下的都批准」**
+    approveAllRemaining: state.approveAllRemaining ?? false,
     // 📌 **注入命中 → 权限闸升档**（见 [10 §10.7](../../docs/10-安全方案.md)）
     injection: injectionOf(state.injectionMatches),
     emit: (card: ToolCard) => {
@@ -239,5 +245,7 @@ export async function toolsNode(
     lastToolCount: consecutive,
     rejectedToolCalls: [...state.rejectedToolCalls, ...rejected],
     steps: (state.steps ?? 0) + 1,
+    // 📌 **用户批了「本轮剩下的都批准」** —— 记进图状态，后面的危险工具不再逐个问
+    ...(outcome.approveAll ? { approveAllRemaining: true } : {}),
   };
 }

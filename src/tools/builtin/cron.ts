@@ -49,9 +49,7 @@ function listText(): string {
   const lines = tasks.map(
     (task) =>
       `- \`${task.id}\` · ${describeCronTask(task)}` +
-      (task.autoApprove.length > 0
-        ? ` · ⚠️ 自动放行：${task.autoApprove.join('、')}`
-        : ''),
+      (task.autoApprove.length > 0 ? ` · ⚠️ 自动放行：${task.autoApprove.join('、')}` : ''),
   );
   return [`共 ${tasks.length} 条定时任务：`, '', ...lines].join('\n');
 }
@@ -68,6 +66,7 @@ export const cronTool: ToolDefinition = {
   // 📌 **normal 档** —— 加一条定时任务不是危险操作
   //    （「无人值守自动放行」的口子**不给**，见文件头的注释）
   sensitivity: 'normal',
+  keywords: ['定时', '每天', '每周', '每月', '提醒', '日程', 'cron', '到点', '计划任务'],
   source: 'builtin',
   enabled: true,
   executor: 'local',

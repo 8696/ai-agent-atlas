@@ -192,13 +192,19 @@ export function ChatPage() {
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
   const handleConfirm = useCallback(
-    async (approved: boolean, _toolCallId: string, fingerprint: string) => {
+    async (
+      approved: boolean,
+      _toolCallId: string,
+      fingerprint: string,
+      approveAll?: boolean,
+    ) => {
       if (!sessionId || confirming) return;
       setConfirming(true);
       setConfirmError('');
       try {
         // 📌 **把入参指纹带回去** —— 后端核对「批准的是不是这一组参数」
-        const result = await confirmToolCall(sessionId, approved, fingerprint);
+        // 📌 **approveAll** —— 「本轮剩下的都批准」
+        const result = await confirmToolCall(sessionId, approved, fingerprint, approveAll);
         // ⚠️ **`resumed` = 原来的流还在跑** —— 它会接着往下流，这里不用管
         // ⚠️ **`completed` = 后端重启过** —— 剩下的已经跑完，把结果并回那条消息
         if (result.mode === 'completed' && result.parts) {
@@ -367,8 +373,8 @@ export function ChatPage() {
             status={status}
             onRegenerate={regenerateAnswer}
             onPickSuggestion={(text) => void submit(text)}
-            onConfirm={(approved, toolCallId, fingerprint) =>
-              void handleConfirm(approved, toolCallId, fingerprint)
+            onConfirm={(approved, toolCallId, fingerprint, approveAll) =>
+              void handleConfirm(approved, toolCallId, fingerprint, approveAll)
             }
             confirming={confirming}
           />

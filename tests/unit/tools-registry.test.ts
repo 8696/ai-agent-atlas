@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { ToolConflictError, buildRegistry, mergeToolGroups } from '../../src/tools/registry';
-import { scoreTool, selectTools, tokenize } from '../../src/tools/selection';
+import { keywordHit, scoreTool, selectTools, tokenize } from '../../src/tools/selection';
 import { globToRegExp, matchesGlob } from '../../src/tools/glob';
 import type { ToolDefinition } from '../../src/tools/types';
 import type { Env } from '../../src/config/schema';
@@ -108,6 +108,75 @@ describe('工具池裁剪', () => {
   it('工具不够多时原样返回', () => {
     const tools = [makeTool('a'), makeTool('b')];
     expect(selectTools(tools, '随便', { MAX_TOOLS_PER_TURN: 12 } as Env)).toHaveLength(2);
+  });
+});
+
+describe('关键词强制保留（[12-c C1](../docs/12-c-需求-工具技能与扩展.md)）', () => {
+  /** 造一个带关键词的工具 */
+  function makeKeywordTool(
+    name: string,
+    keywords: string[] | undefined,
+    groups: string[][] | undefined = undefined,
+    sensitivity: ToolDefinition['sensitivity'] = 'high',
+  ): ToolDefinition {
+    return {
+      ...makeTool(name, sensitivity),
+      ...(keywords ? { keywords } : {}),
+      ...(groups ? { keywordGroups: groups } : {}),
+    };
+  }
+
+  it('⚠️ 命中关键词的高危工具 —— 哪怕只剩一个名额也要留下', () => {
+    const tools = [
+      makeKeywordTool('shell', ['跑', '执行', '测试']),
+      makeKeywordTool('write_file', ['写']),
+      makeKeywordTool('delete_path', ['删文件']),
+      makeTool('a'),
+      makeTool('b'),
+    ];
+    const picked = selectTools(tools, '跑一下测试', { MAX_TOOLS_PER_TURN: 3 } as Env);
+    expect(picked.map((tool) => tool.name)).toContain('shell');
+  });
+
+  it('⚠️ 没命中关键词的高危工具仍按相关度抢名额', () => {
+    const tools = [
+      makeKeywordTool('shell', ['跑', '执行']),
+      makeKeywordTool('write_file', ['写']),
+      makeTool('a'),
+      makeTool('b'),
+    ];
+    const picked = selectTools(tools, '跑一下测试', { MAX_TOOLS_PER_TURN: 3 } as Env);
+    // ⚠️ **shell 靠关键词留下** —— 不是靠相关度
+    expect(picked.map((tool) => tool.name)).toContain('shell');
+    expect(picked).toHaveLength(3);
+  });
+
+  it('⚠️ 组合关键词 —— 「把那条记忆删掉」不该带出删文件的工具', () => {
+    const forget = makeKeywordTool('memory_forget', undefined, [
+      ['记忆', '偏好'],
+      ['删', '清空', '忘'],
+    ]);
+    const remove = makeKeywordTool('delete_path', undefined, [
+      ['删', '删除', '删掉', '清理', '移除'],
+      ['文件', '目录', '文件夹', '路径', 'tmp', '临时', 'data'],
+    ]);
+    // 📌 **强制保留的判定** —— 用户想删的是记忆，不是文件
+    expect(keywordHit(forget, '把那条记忆删掉')).toBe(true);
+    expect(keywordHit(remove, '把那条记忆删掉')).toBe(false);
+    // 📌 **真要删文件时才轮到 delete_path**
+    expect(keywordHit(remove, '把 data/tmp 删掉')).toBe(true);
+  });
+
+  it('⚠️ ASCII 关键词按词边界 —— `ls` 不该命中 `list`', () => {
+    const tool = makeKeywordTool('shell', ['ls']);
+    expect(keywordHit(tool, '跑一下 list')).toBe(false);
+    expect(keywordHit(tool, '跑一下 ls -la')).toBe(true);
+  });
+
+  it('中文关键词按子串', () => {
+    const tool = makeKeywordTool('shell', ['跑']);
+    expect(keywordHit(tool, '跑一下测试')).toBe(true);
+    expect(keywordHit(tool, '测试一下')).toBe(false);
   });
 });
 

@@ -34,6 +34,7 @@ export const currentTimeTool: ToolDefinition = {
     '纯本地计算，不联网。',
   schema: currentTimeSchema,
   sensitivity: 'low',
+  keywords: ['时间', '几点', '几号', '日期', '星期', 'today', 'now', 'time'],
   source: 'builtin',
   enabled: true,
   executor: 'subagent',

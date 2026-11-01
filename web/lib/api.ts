@@ -215,10 +215,16 @@ export async function confirmToolCall(
   sessionId: string,
   approved: boolean,
   fingerprint?: string,
+  approveAll?: boolean,
 ): Promise<ConfirmResponse> {
   const { data } = await api.post<ConfirmResponse>(
     '/chat/confirm',
-    { sessionId, approved, ...(fingerprint ? { fingerprint } : {}) },
+    {
+      sessionId,
+      approved,
+      ...(fingerprint ? { fingerprint } : {}),
+      ...(approveAll ? { approveAll } : {}),
+    },
     { timeout: 180_000 },
   );
   return data;

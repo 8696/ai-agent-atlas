@@ -28,6 +28,7 @@ export type AuditAction =
   | 'MODEL_FALLBACK'
   | 'TOOL_APPROVED'
   | 'TOOL_AUTO_APPROVED'
+  | 'TOOL_BATCH_APPROVED'
   | 'TOOL_REJECTED'
   | 'TOOL_BLOCKED'
   | 'TOOL_EXECUTED'

@@ -143,6 +143,30 @@ export const AtlasState = Annotation.Root({
   }),
 
   /**
+   * ⚠️ **本轮已批准「剩下的都批准」** —— 后面的危险工具不再逐个弹确认。
+   *
+   * 📌 **每轮开头清零**（`prepare` 里重置）——
+   *    所以它**只在这一轮有效**，下一轮还得重新问。
+   *    （见 [12-b B5](./docs/12-b-需求-对话与编排.md)）
+   */
+  approveAllRemaining: Annotation<boolean>({
+    reducer: (_current, update) => update ?? false,
+    default: () => false,
+  }),
+
+  /**
+   * ⚠️ **token 上限**（**子代理用自己的** —— 0 = 用全局的）。
+   *
+   * 📌 **子代理的花费记在主会话的月度预算里** ——
+   *    没有这道闸，几个并发子代理就能把一个月的预算烧光
+   *    （见 [12-d D4](./docs/12-d-需求-记忆与配置.md)）。
+   */
+  maxTokens: Annotation<number>({
+    reducer: (_current, update) => update ?? 0,
+    default: () => 0,
+  }),
+
+  /**
    * ⚠️ **本轮累计的 token**（**每轮开头清零**）。
    *
    * 📌 **与 `budgetUsed` 分开** —— `budgetUsed` 是「这个会话一共花了多少」
