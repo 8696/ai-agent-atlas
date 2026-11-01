@@ -107,7 +107,7 @@ describe('shell · 黑名单在策略层', () => {
  * （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
  *
  * ⚠️ **文件工具的路径沙箱管不到命令内容** ——
- * `echo x > ../../AGENTS.md` 直接落在项目根，
+ * `echo x > AGENTS.md` 直接落在项目根，
  * 那等于给模型开了一个「永久改写自己提示词」的口子。
  */
 describe('shell · 上下文文件只读', () => {
@@ -119,8 +119,17 @@ describe('shell · 上下文文件只读', () => {
     expect(result.error).toContain('CONTEXT_FILE_WRITE_BLOCKED');
   });
 
-  it('⚠️ 相对路径爬回项目根改写 → 拒绝', async () => {
-    const result = await invoke({ command: "echo '恶意指令' > ../../AGENTS.md" });
+  it('⚠️ 相对路径改写 → 拒绝', async () => {
+    // 📌 **沙箱根就是项目根**（2026-11-01 起）——
+    //    所以「相对路径指到 AGENTS.md」就是 `AGENTS.md` 本身，
+    //    不再是 `../../AGENTS.md`（那已经指到项目根外面去了）
+    const result = await invoke({ command: "echo '恶意指令' > AGENTS.md" });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('CONTEXT_FILE_WRITE_BLOCKED');
+  });
+
+  it('⚠️ 相对路径带 `..` 绕回项目根 → 拒绝', async () => {
+    const result = await invoke({ command: "echo '恶意指令' > sub/../AGENTS.md" });
     expect(result.ok).toBe(false);
     expect(result.error).toContain('CONTEXT_FILE_WRITE_BLOCKED');
   });

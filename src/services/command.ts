@@ -8,6 +8,13 @@ import { stopSessionStream } from './chat.js';
 import { resolveFallback, resolveModel } from './model.js';
 import { listPersonalities } from './prompt.js';
 import { getSkills } from '../skills/store.js';
+import {
+  clearMemory,
+  deleteMemory,
+  listMemories,
+  memoryUsageHeader,
+} from './memory/index.js';
+import type { MemoryFile } from './memory/types.js';
 import { compressSession, loadSessionMessages } from './session-summary.js';
 import {
   createSession,
@@ -49,6 +56,7 @@ export const COMMANDS: CommandSpec[] = [
   { name: 'undo', usage: '/undo', summary: '撤销上一轮（回退消息与图状态，不删会话）' },
   { name: 'compress', usage: '/compress', summary: '手动压缩当前会话上下文' },
   { name: 'usage', usage: '/usage', summary: '本月 token / 花费 / 本会话用量' },
+  { name: 'memory', usage: '/memory [list|delete|clear]', summary: '查看长期记忆；删条目（/memory delete USER 名字）或清空（/memory clear USER）' },
   { name: 'skills', usage: '/skills', summary: '列出已安装技能' },
   { name: 'thinking', usage: '/thinking on|off', summary: '思考模式开关（下一轮生效）' },
   { name: 'stop', usage: '/stop', summary: '停止当前流式输出' },
@@ -115,6 +123,53 @@ function listSkills(): Array<{ name: string; description: string; scripts: numbe
     // ⚠️ **技能装错了也别让命令挂掉** —— 启动时才会因为装错而失败
     return [];
   }
+}
+
+/**
+ * `/memory` 的正文 —— **列出记忆条目**。
+ *
+ * 📌 **只读的这一支没有确认问题** —— 看一眼不改变任何东西。
+ */
+function memoryListText(file?: MemoryFile): string {
+  const items = listMemories(file);
+  const lines = [
+    '**长期记忆**',
+    '',
+    memoryUsageHeader(),
+    '',
+  ];
+  if (items.length === 0) {
+    lines.push('（还没有记忆条目）');
+  } else {
+    for (const item of items) {
+      const flags = [
+        item.entry.kind,
+        item.entry.source === 'manual' ? '手动' : '自动',
+        item.entry.status === 'archived' ? '已归档' : '',
+        item.entry.updated || '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      lines.push(`- [${item.file}] \`${item.entry.name}\`（${flags}）：${item.entry.body}`);
+    }
+  }
+  lines.push('', '`/memory delete <MEMORY|USER> <名字>` 删一条 · `/memory clear <MEMORY|USER>` 清空一个文件');
+  return lines.join('\n');
+}
+
+/** `/memory` 的用法提示 */
+const MEMORY_USAGE = [
+  '**用法**',
+  '',
+  '- `/memory` 或 `/memory list [MEMORY|USER]` —— 查看记忆条目',
+  '- `/memory delete <MEMORY|USER> <名字>` —— 永久删掉一条',
+  '- `/memory clear <MEMORY|USER>` —— 清空一个文件的所有条目（**不可恢复**）',
+].join('\n');
+
+/** 把参数解析成记忆文件（**只认 `MEMORY` / `USER`** —— 大小写不限） */
+function toMemoryFile(value: string | undefined): MemoryFile | undefined {
+  const upper = (value ?? '').toUpperCase();
+  return upper === 'MEMORY' || upper === 'USER' ? upper : undefined;
 }
 
 /** `/usage` 的正文 */
@@ -363,6 +418,73 @@ export async function runCommand(
         return {
           text: await usageText(sessionId),
           data: { command: 'usage' },
+          action: 'none',
+        };
+      }
+
+      case 'memory': {
+        // 📌 **子命令 + 参数** —— `/memory delete USER prefers-pnpm`
+        const parts = parsed.args ? parsed.args.split(/\s+/).filter(Boolean) : [];
+        const action = (parts[0] ?? 'list').toLowerCase();
+        const file = toMemoryFile(parts[1]);
+
+        if (action === 'list') {
+          // 📌 **给了文件就只看那个文件** —— 不给就两个都列
+          const wanted = parts[1] ? file : undefined;
+          if (parts[1] && !wanted) {
+            return {
+              text: `记忆文件只有 MEMORY 与 USER 两个 —— 你写的是「${parts[1]}」。\n\n${MEMORY_USAGE}`,
+              data: { command: 'memory' },
+              action: 'none',
+            };
+          }
+          return {
+            text: memoryListText(wanted),
+            data: { command: 'memory', action: 'list', file: wanted ?? null },
+            action: 'none',
+          };
+        }
+
+        if (action === 'delete') {
+          const name = parts[2];
+          if (!file || !name) {
+            return {
+              text: `用法：\`/memory delete <MEMORY|USER> <名字>\`\n\n${MEMORY_USAGE}`,
+              data: { command: 'memory', action: 'delete' },
+              action: 'none',
+            };
+          }
+          const result = deleteMemory(file, name);
+          return {
+            text: result.ok
+              ? `${result.message}\n\n${memoryListText()}`
+              : `❌ ${result.message}`,
+            data: { command: 'memory', action: 'delete', file, name, ok: result.ok },
+            action: 'none',
+          };
+        }
+
+        if (action === 'clear') {
+          if (!file) {
+            return {
+              text: `用法：\`/memory clear <MEMORY|USER>\`\n\n${MEMORY_USAGE}`,
+              data: { command: 'memory', action: 'clear' },
+              action: 'none',
+            };
+          }
+          const result = clearMemory(file);
+          return {
+            text: result.ok
+              ? `${result.message}\n\n${memoryListText()}`
+              : `❌ ${result.message}`,
+            data: { command: 'memory', action: 'clear', file, ok: result.ok },
+            action: 'none',
+          };
+        }
+
+        return {
+          text: `${MEMORY_USAGE}\n\n${memoryListText()}`,
+          data: { command: 'memory', action: 'unknown' },
           action: 'none',
         };
       }

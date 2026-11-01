@@ -8,6 +8,7 @@ import { createChatModel, resolveModel } from '../model.js';
 import { recordUsage, usageOf } from '../cost.js';
 import { readTextFile } from '../prompt.js';
 import { scanMemoryWrite } from './scan.js';
+import { recentManualMemoryWrite } from './manual-write.js';
 import { archiveMemoryEntry, readMemory, upsertMemoryEntry } from './store.js';
 import { MEMORY_FILES, type MemoryFile, type MemoryKind } from './types.js';
 
@@ -34,10 +35,35 @@ export const MEMORY_SIGNALS: RegExp[] = [
   /\bremember\b|\bfrom now on\b|\balways\b|\bnever\b|\bI prefer\b|\bmy name is\b|\bI use\b/i,
 ];
 
+/**
+ * T1 信号（**「管理记忆」的意图**）——
+ * 「删掉那条记忆」「清空记忆」「更新记忆」这类话**不含任何可记的事实**，
+ * 上面的信号一个都不命中 → 抽取压根不会启动。
+ *
+ * 📌 **为什么要单独一组** —— 用户明说要改记忆时，
+ *    得让抽取跑起来（模型看得到现有条目，判断得出该归档哪条）。
+ * ⚠️ **别把「删除」当通用信号** —— 「把这个文件删掉」会命中，
+ *    白花一次模型调用；**必须跟「记忆」沾边**。
+ */
+export const MEMORY_MANAGEMENT_SIGNALS: RegExp[] = [
+  // 动词 + 「记忆」
+  /(?:删除|删掉|删了|清空|清掉|忘掉|别记|不要记|不记了|改掉|更新|修改|纠正|新增|加一条|写一条).{0,10}(?:记忆|备忘)/,
+  // 「记忆」+ 动词
+  /(?:记忆|备忘).{0,10}(?:删除|删掉|清空|清掉|忘掉|别记|不要记|改掉|更新|修改|纠正|新增|加一条|写一条|去掉)/,
+  // 英文
+  /\bforget\b|\b(?:delete|remove|clear|update|change)\s+(?:the\s+|my\s+|that\s+)?memor/i,
+];
+
 /** 这一轮有没有「可能值得记」的信号 */
 export function hasMemorySignal(text: string): boolean {
   if (!text.trim()) return false;
   return MEMORY_SIGNALS.some((pattern) => pattern.test(text));
+}
+
+/** 这一轮有没有「用户要管理记忆」的信号 */
+export function hasMemoryManagementSignal(text: string): boolean {
+  if (!text.trim()) return false;
+  return MEMORY_MANAGEMENT_SIGNALS.some((pattern) => pattern.test(text));
 }
 
 /** 模型返回的一条操作 */
@@ -134,6 +160,9 @@ function extractionPrompt(): string {
     '- `body`：**一句话**',
     '',
     '⚠️ **已有则改写（`update`），不要重复追加**',
+    '⚠️ **用户明说「别记了 / 把那条记忆删掉」→ 归档那一条（`archive`）**',
+    '  —— 归档是软删：不再被召回，文件里还看得见（**永久删除要走工具确认**）',
+    '⚠️ **「清空全部记忆」不要逐条 `archive`** —— 那是永久删除，交给工具处理',
     '⚠️ **没有值得记的就输出 `[]`**',
     '⚠️ **只记事实，不记指令**',
   ].join('\n');
@@ -144,16 +173,30 @@ function extractionPrompt(): string {
  *
  * @param userText 这一轮的用户输入
  * @param assistantText 这一轮的回答
+ * @param sessionId 当前会话（**用来判断「这一轮已经手动处理过记忆」**）
  */
 export async function runMemoryExtraction(input: {
   userText: string;
   assistantText: string;
+  sessionId?: string | undefined;
 }): Promise<ExtractionResult> {
   const result: ExtractionResult = { applied: 0, rejected: 0, notes: [] };
   if (!config.MEMORY_ENABLED) return result;
 
+  // 📌 **这一轮有人用工具手动改过记忆 → 不再自动抽取** ——
+  //    否则同一条记忆会被写两遍（名字还不一样）
+  if (recentManualMemoryWrite(input.sessionId)) {
+    logger.info(
+      { sessionId: input.sessionId },
+      '这一轮已经手动处理过记忆 —— 跳过自动抽取',
+    );
+    return result;
+  }
+
   // ── T1：正则预筛 ──
-  if (!hasMemorySignal(input.userText)) return result;
+  if (!hasMemorySignal(input.userText) && !hasMemoryManagementSignal(input.userText)) {
+    return result;
+  }
 
   const model = resolveModel();
   if (!model) return result;

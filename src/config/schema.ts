@@ -103,8 +103,12 @@ export const envSchema = z.object({
   TOOL_CONFIRM_LEVEL: z.enum(['none', 'normal', 'high']).default('high'),
 
   // ── 编排 ──────────────────────────────────────────────
-  /** 每轮最多给模型几个工具（按相关度裁剪） */
-  MAX_TOOLS_PER_TURN: z.coerce.number().int().positive().default(12),
+  /** 每轮最多给模型几个工具（按相关度裁剪）
+   *  ⚠️ **13 而不是 12** —— 2026-11-01 加了 `memory` 工具（normal 档，
+   *    基础工具池 +1）→ 高危工具的名额从 3 个降到 2 个。
+   *    调到 13 把高危工具的名额补回来（`memory_forget` 也在里面）。
+   */
+  MAX_TOOLS_PER_TURN: z.coerce.number().int().positive().default(13),
   /** 并行子代理上限 */
   SUBAGENT_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
   /** 单个子代理的工具步数上限 */

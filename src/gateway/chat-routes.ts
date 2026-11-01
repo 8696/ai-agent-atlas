@@ -361,7 +361,13 @@ chatRouter.post('/chat', async (ctx) => {
     modelName: model.name,
     after: (text) => {
       // 📌 **记忆抽取：fire-and-forget**（不阻塞这一轮）
-      void runMemoryExtraction({ userText, assistantText: text }).catch((err) => {
+      //    📌 **带上会话 id** —— 这一轮若已用 `memory` 工具手动改过记忆，
+      //    自动抽取会跳过（否则同一条记忆被写两遍）
+      void runMemoryExtraction({
+        userText,
+        assistantText: text,
+        ...(sessionId ? { sessionId } : {}),
+      }).catch((err) => {
         logger.warn({ err }, '记忆抽取失败');
       });
     },

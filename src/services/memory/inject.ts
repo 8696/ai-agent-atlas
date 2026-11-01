@@ -65,8 +65,13 @@ export function pickMemories(query: string): MemoryPick[] {
   return picks;
 }
 
-/** 用量表头 —— **让模型知道自己记了多少、还剩多少** */
-function usageHeader(): string {
+/**
+ * 用量表头 —— **让模型知道自己记了多少、还剩多少**。
+ *
+ * 📌 **导出给工具与 `/memory` 命令用** —— 用户问「我记了多少」时，
+ *    不用再让模型自己数文件。
+ */
+export function memoryUsageHeader(): string {
   const parts: string[] = [];
   for (const file of MEMORY_FILES) {
     const content = readMemory(file);
@@ -114,5 +119,5 @@ export function buildMemorySection(query: string): string {
     return `- ${entry.name}（${meta}）：${entry.body}`;
   });
 
-  return `${usageHeader()}\n${lines.join('\n')}`;
+  return `${memoryUsageHeader()}\n${lines.join('\n')}`;
 }

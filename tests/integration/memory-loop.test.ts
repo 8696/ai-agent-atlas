@@ -55,6 +55,9 @@ const { initDatabase, sequelize } = await import('../../src/db');
 const { umzug } = await import('../../scripts/migrate');
 const { runMemoryExtraction } = await import('../../src/services/memory/extract');
 const { readMemory } = await import('../../src/services/memory/store');
+const { clearMemory, addMemory } = await import('../../src/services/memory/index.js');
+const { noteManualMemoryWrite, resetManualMemoryWrites } =
+  await import('../../src/services/memory/manual-write');
 const { searchAll } = await import('../../src/services/search');
 const { Message } = await import('../../src/models/message.model');
 const { Session } = await import('../../src/models/session.model');
@@ -67,6 +70,11 @@ beforeAll(async () => {
 
 beforeEach(() => {
   extractionReply = '';
+  // ⚠️ **记忆文件是跨用例的** —— 每个用例都从空文件开始
+  for (const file of ['MEMORY', 'USER'] as const) {
+    clearMemory(file);
+  }
+  resetManualMemoryWrites();
 });
 
 describe('长期记忆的抽取闭环（[12-d D2](./12-d-需求-记忆与配置.md)）', () => {
@@ -94,6 +102,37 @@ describe('长期记忆的抽取闭环（[12-d D2](./12-d-需求-记忆与配置.
       assistantText: '好。',
     });
     expect(result.applied).toBe(0);
+  });
+
+  it('📌 「删掉关于我生日的记忆」→ 管理意图也能触发抽取（归档那一条）', async () => {
+    addMemory({ file: 'USER', name: 'birthday', body: '用户的生日是 3 月 1 日' });
+    extractionReply = JSON.stringify([{ op: 'archive', file: 'USER', name: 'birthday' }]);
+
+    const result = await runMemoryExtraction({
+      userText: '删掉关于我生日的记忆',
+      assistantText: '好，删了。',
+    });
+
+    expect(result.applied).toBe(1);
+    const entry = readMemory('USER').entries.find((item) => item.name === 'birthday');
+    expect(entry?.status).toBe('archived');
+  });
+
+  it('⚠️ 这一轮手动改过记忆 → 自动抽取不再重复写', async () => {
+    extractionReply = JSON.stringify([
+      { op: 'add', file: 'USER', name: 'prefers-pnpm', kind: 'preference', body: '用户 prefers pnpm' },
+    ]);
+    // 📌 **主代理已经用 `memory` 工具写过了** —— 抽取不该再写一遍
+    noteManualMemoryWrite('session-x');
+
+    const result = await runMemoryExtraction({
+      userText: '记住我 prefers pnpm',
+      assistantText: '好，记下了。',
+      sessionId: 'session-x',
+    });
+
+    expect(result.applied).toBe(0);
+    expect(readMemory('USER').entries).toHaveLength(0);
   });
 });
 

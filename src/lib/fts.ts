@@ -41,6 +41,18 @@ export interface FtsHit {
 let capability: FtsCapability | undefined;
 
 /**
+ * 正在跑的探测（**单飞** —— 并发探测会互相踩）。
+ *
+ * ⚠️ **为什么必须单飞** —— 探测靠「建一张临时虚表再删掉」：
+ *    两个探测同时跑，第二个会撞上「临时表已存在」→
+ *    它以为 trigram 不可用 → **把降级结果缓存下来** →
+ *    整个进程的中文检索就此失灵（表建出来没有 trigram 分词器）。
+ * ⚠️ **这个坑踩过一次** —— 2026-11-01 加记忆工具时，
+ *    两次并发写记忆（自动抽取 + 手动工具）把并发探测撞出来了。
+ */
+let probePending: Promise<FtsCapability> | undefined;
+
+/**
  * 探测 FTS5 / trigram 可用性。
  *
  * 📌 **用「建一张临时虚表再删掉」来探测** ——
@@ -48,9 +60,21 @@ let capability: FtsCapability | undefined;
  */
 export async function probeFts(): Promise<FtsCapability> {
   if (capability) return capability;
+  // 📌 **单飞** —— 后来的调用等同一个 Promise
+  if (!probePending) {
+    probePending = detectFts().finally(() => {
+      probePending = undefined;
+    });
+  }
+  return probePending;
+}
 
+/** 真正去探（**只跑一次** —— 见上面的 `probePending`） */
+async function detectFts(): Promise<FtsCapability> {
   // ── 先试 trigram（**中文搜索靠它**） ──
   try {
+    // 📌 **先删干净** —— 上一次探测可能建了表没删掉
+    await sequelize.query('DROP TABLE IF EXISTS temp.__atlas_fts_probe');
     await sequelize.query(
       "CREATE VIRTUAL TABLE temp.__atlas_fts_probe USING fts5(x, tokenize='trigram')",
     );
@@ -61,6 +85,7 @@ export async function probeFts(): Promise<FtsCapability> {
     const reason = err instanceof Error ? err.message : String(err);
     // ── 再试默认分词器（**能搜英文，只是搜不了中文**） ──
     try {
+      await sequelize.query('DROP TABLE IF EXISTS temp.__atlas_fts_probe');
       await sequelize.query('CREATE VIRTUAL TABLE temp.__atlas_fts_probe USING fts5(x)');
       await sequelize.query('DROP TABLE temp.__atlas_fts_probe');
       capability = { available: true, trigram: false, reason: 'trigram 不可用，中文检索会退化' };
@@ -75,6 +100,7 @@ export async function probeFts(): Promise<FtsCapability> {
 /** 测试用：重置探测缓存 */
 export function resetFtsProbe(): void {
   capability = undefined;
+  probePending = undefined;
 }
 
 /** 索引表建好了没（**建过一次就不重复建**） */
@@ -95,25 +121,50 @@ const ENSURE_RETRY_AFTER_MS = 60_000;
  * ⚠️ **`messages_fts` 与 `messages` 用 rowid 对齐** —— 触发器写 `new.rowid`。
  */
 export async function ensureFtsTables(force = false): Promise<FtsCapability> {
+  // 📌 **单飞** —— 建表是 DDL，两个并发调用会互相踩
+  //    （一个建到一半，另一个看到「表在了」就当建好了 → 触发器永远缺）
+  if (!ensurePending) {
+    ensurePending = buildFtsTables(force).finally(() => {
+      ensurePending = undefined;
+    });
+  }
+  return ensurePending;
+}
+
+/** 正在建的 Promise（**单飞**） */
+let ensurePending: Promise<FtsCapability> | undefined;
+
+/** 真正去建（**同一时刻只跑一次** —— 见上面的 `ensurePending`） */
+async function buildFtsTables(force: boolean): Promise<FtsCapability> {
   const probe = await probeFts();
   if (!probe.available) return probe;
   if (tablesEnsured && !force) return probe;
 
-  // ⚠️ **失败过就先别重试** —— 每轮对话都去建一遍表会把每一轮都拖慢
-  if (!force && Date.now() - lastEnsureFailure < ENSURE_RETRY_AFTER_MS) return probe;
-
   // 📌 **先查在不在** —— 建表是 DDL（要写 schema + fsync），
   //    每轮都建一遍会把每一轮对话都拖慢几百毫秒
   try {
-    const rows = await sequelize.query<{ name: string }>(
-      "SELECT name FROM sqlite_master WHERE type IN ('trigger','table') AND (name LIKE 'messages_fts_%' OR name = 'skills_fts')",
+    const rows = await sequelize.query<{ name: string; type: string }>(
+      `SELECT name, type FROM sqlite_master
+        WHERE (type = 'trigger' AND name LIKE 'messages_fts_%')
+           OR name IN ('messages_fts', 'memory_fts', 'skills_fts')`,
       { type: QueryTypes.SELECT },
     );
-    // ⚠️ **3 个消息触发器 + 1 张技能表** —— 缺一个就往下走重建
-    const triggers = rows.filter((row) => row.name.startsWith('messages_fts_')).length;
-    const hasSkills = rows.some((row) => row.name === 'skills_fts');
-    if (triggers >= 3 && hasSkills) {
+    // ⚠️ **只数真触发器** —— FTS5 还会建 `messages_fts_data` / `_idx` / `_content`
+    //    这些**影子表**，名字同样以 `messages_fts_` 开头。
+    //    把影子表当触发器数 → 「表建了一半」也会被当成「建好了」→
+    //    触发器永远补不上 → **消息永远进不了索引，跨会话检索静默失效**
+    //    （2026-11-01 加记忆工具时踩到过一次）
+    const triggers = rows.filter((row) => row.type === 'trigger').length;
+    const hasTables = ['messages_fts', 'memory_fts', 'skills_fts'].every((name) =>
+      rows.some((row) => row.name === name),
+    );
+    if (triggers >= 3 && hasTables) {
       tablesEnsured = true;
+      return probe;
+    }
+    // ⚠️ **冷却只在「表都在」时生效** ——
+    //    缺触发器时必须继续补（否则消息永远进不了索引）
+    if (!force && hasTables && Date.now() - lastEnsureFailure < ENSURE_RETRY_AFTER_MS) {
       return probe;
     }
   } catch {

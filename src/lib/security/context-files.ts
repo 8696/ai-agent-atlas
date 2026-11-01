@@ -11,7 +11,7 @@ import { realpathAllowMissing } from './sandbox.js';
  * 文件工具的路径沙箱只认工作区（`data/workspace/`），
  * 项目根的 `SOUL.md` / `AGENTS.md` 确实写不了 ——
  * 但 **`shell` 工具的命令内容不受路径沙箱管**
- * （`echo x > ../../AGENTS.md` 直接落在项目根），技能脚本同理。
+ * （`echo x > AGENTS.md` 直接落在项目根），技能脚本同理。
  * 那等于给模型开了一个「永久改写自己提示词」的口子 ——
  * 一次 shell 就能把人格与项目指令换掉，后面每轮都按新的来。
  *

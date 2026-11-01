@@ -24,7 +24,7 @@ export {
   memoryPath,
   syncMemoryIndex,
 } from './store.js';
-export { buildMemorySection, pickMemories } from './inject.js';
+export { buildMemorySection, pickMemories, memoryUsageHeader } from './inject.js';
 export { runMemoryExtraction, hasMemorySignal, parseOps } from './extract.js';
 export { scanMemoryWrite } from './scan.js';
 
@@ -125,3 +125,11 @@ export function listMemories(file?: MemoryFile): Array<{ file: MemoryFile; entry
   }
   return out;
 }
+
+/**
+ * 手动写入的记录 —— **用来抑制自动抽取**。
+ *
+ * 📌 **实现在 `manual-write.ts`** —— `extract.ts` 也要用它，
+ *    放在这里会形成 `index → extract → index` 的循环依赖。
+ */
+export { noteManualMemoryWrite, recentManualMemoryWrite } from './manual-write.js';

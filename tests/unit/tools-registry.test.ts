@@ -71,6 +71,9 @@ describe('工具注册表', () => {
     expect(names).toContain('shell');
     expect(names).toContain('http_request');
     expect(names).toContain('current_time');
+    // 📌 **记忆工具也在池子里** —— 对话里要能增删改记忆
+    expect(names).toContain('memory');
+    expect(names).toContain('memory_forget');
   });
 });
 

@@ -188,6 +188,38 @@ describe('斜杠命令（[12-b B9](../docs/12-b-需求-对话与编排.md)）', 
     expect(text).toContain('思考模式');
   });
 
+  it('/memory → 列出条目 · 删一条 · 清空（**零模型调用**）', async () => {
+    const sessionId = await createSession();
+    const { addMemory, clearMemory, readMemory } = await import(
+      '../../src/services/memory/index.js'
+    );
+    clearMemory('USER');
+    addMemory({ file: 'USER', name: 'prefers-pnpm', body: '用户用 pnpm' });
+    modelCalls = 0;
+
+    // 📌 **列出** —— 要带条目名与用量表头
+    const listed = await sendCommand(sessionId, '/memory');
+    expect(listed.text).toContain('prefers-pnpm');
+    expect(listed.text).toContain('记忆库已用');
+    expect(modelCalls).toBe(0);
+
+    // 📌 **删一条**
+    const deleted = await sendCommand(sessionId, '/memory delete USER prefers-pnpm');
+    expect(deleted.text).toContain('已删除');
+    expect(readMemory('USER').entries).toHaveLength(0);
+
+    // 📌 **清空一个文件**
+    addMemory({ file: 'MEMORY', name: 'db-port', body: '数据库在 5432' });
+    const cleared = await sendCommand(sessionId, '/memory clear MEMORY');
+    expect(cleared.text).toContain('已清空');
+    expect(readMemory('MEMORY').entries).toHaveLength(0);
+
+    // ⚠️ **写错文件名 → 明确报错，不猜**
+    const bad = await sendCommand(sessionId, '/memory clear NOTHING');
+    expect(bad.text).toContain('MEMORY');
+    expect(modelCalls).toBe(0);
+  });
+
   it('⚠️ 命令结果落库（刷新后还在）', async () => {
     const sessionId = await createSession();
     await sendCommand(sessionId, '/help');
