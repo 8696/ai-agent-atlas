@@ -49,7 +49,7 @@ interface ParsedSection {
  * 按 `## ` 切段。
  *
  * ⚠️ **围栏代码块里的 `##` 不算标题** ——
- * 出厂模板里有一段 ```markdown 围起来的「条目格式示例」，
+ * 用户可能在文件里贴着「条目格式」示例（围起来的），
  * 不处理的话那个示例会被当成一条真的记忆。
  */
 function splitSections(raw: string): { header: string; sections: ParsedSection[] } {
@@ -92,7 +92,7 @@ function parseMeta(lines: string[]): {
       if (trimmed === '') continue;
       const match = /^-\s*([a-z_]+)\s*:\s*(.*)$/.exec(trimmed);
       if (match?.[1]) {
-        // ⚠️ **去掉行尾注释** —— 出厂模板写的是 `- kind: fact          # fact | context`
+        // ⚠️ **去掉行尾注释** —— 用户常写成 `- kind: fact          # fact | context`
         const value = (match[2] ?? '').replace(/\s+#.*$/, '').trim();
         meta[match[1]] = value;
         continue;
@@ -131,7 +131,7 @@ export function parseMemoryFile(raw: string): { header: string; entries: MemoryE
 
   for (const section of sections) {
     const name = section.heading.trim();
-    // ⚠️ **占位符标题不算条目** —— 模板里的 `## <一句话标题>` 是示例
+    // ⚠️ **占位符标题不算条目** —— 用户贴的示例常是 `## <一句话标题>`
     if (!name || name.startsWith('<')) continue;
     const { meta, body } = parseMeta(section.lines);
     entries.push({
@@ -385,7 +385,7 @@ export function deleteMemoryEntry(
   return result;
 }
 
-/** 清空一个文件（**保留文件头**） */
+/** 清空一个文件（**保留用户自己写的文件头** —— 出厂不带头注了） */
 export function clearMemoryEntries(
   file: MemoryFile,
   options: { audit?: boolean } = {},

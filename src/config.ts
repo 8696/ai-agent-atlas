@@ -80,11 +80,18 @@ export const paths = {
 ensureDirs();
 
 // ⚠️ 出厂文件 / 运行时文件不存在就补 —— 缺了也能直接跑
-const { created } = ensureFiles();
+const { created, stripped } = ensureFiles();
 if (created.length > 0) {
   console.info(
     `[Atlas] 已初始化 ${created.length} 个文件：\n` +
       created.map((p) => `  · ${p.replace(`${PROJECT_ROOT}/`, '')}`).join('\n'),
+  );
+}
+// 📌 **旧出厂头注摘掉了** —— 记忆文件现在只装条目
+if (stripped.length > 0) {
+  console.info(
+    `[Atlas] 已移除 ${stripped.length} 个记忆文件的旧出厂头注：\n` +
+      stripped.map((p) => `  · ${p.replace(`${PROJECT_ROOT}/`, '')}`).join('\n'),
   );
 }
 

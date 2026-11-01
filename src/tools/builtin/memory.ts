@@ -198,7 +198,7 @@ export const memoryForgetTool: ToolDefinition = {
   name: 'memory_forget',
   description:
     '永久删除记忆条目，或清空整个记忆文件（**不可恢复** —— 执行前会弹确认卡片给用户批准）。' +
-    '动作：delete（删掉一条，必须给 name）· clear（清空一个文件的所有条目，文件头保留）。' +
+    '动作：delete（删掉一条，必须给 name）· clear（清空一个文件的所有条目）。' +
     '用户说「把那条记忆删掉」「清空我的记忆」「别记我的地址了」时用这个。' +
     '⚠️ 只是想让某条记忆不再被召回（但仍想留着），用 memory 的 archive —— 它可恢复。',
   schema: forgetSchema,

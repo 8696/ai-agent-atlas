@@ -93,8 +93,35 @@ export const DEFAULT_SOUL = `# 人格
 - **有主见**：方案不好就直说，但别替用户做决定
 `;
 
-/** `data/memory/MEMORY.md` 的模板 —— 环境侧记忆 */
-export const MEMORY_FILE_TEMPLATE = `# Agent 记忆
+/**
+ * `data/memory/MEMORY.md` 的模板 —— 环境侧记忆。
+ *
+ * ⚠️ **故意是空的** —— 文件里只装条目，不带默认头注：
+ * - **头注会误导人** —— 「条目格式」示例长得跟真条目一样，
+ *   人（和模型）打开文件会以为那是一条记忆
+ * - **头注占预算** —— `USER.md` 上限只有 1375 字符，
+ *   一段 500 字符的样板说明直接吃掉三分之一
+ *
+ * 📌 **格式说明在别处** —— 文档 [12-d D2](../../docs/12-d-需求-记忆与配置.md)
+ * 与 `memory` 工具的参数 schema 里都有，不必塞进用户的数据文件。
+ */
+export const MEMORY_FILE_TEMPLATE = '';
+
+/**
+ * `data/memory/USER.md` 的模板 —— 用户侧画像。
+ *
+ * ⚠️ **故意是空的** —— 理由同 `MEMORY_FILE_TEMPLATE`。
+ */
+export const USER_FILE_TEMPLATE = '';
+
+/**
+ * ⚠️ **旧模板（已废弃）** —— 只用于**一次性清理**磁盘上已有的旧头注。
+ *
+ * 📌 **2026-11-01**：记忆文件原本出厂带一段「条目格式」头注，
+ *    现在去掉了。启动时如果发现文件开头正是这段旧模板，就把它摘掉，
+ *    保留用户自己写的条目（见 `src/config/ensure.ts`）。
+ */
+export const LEGACY_MEMORY_FILE_TEMPLATE = `# Agent 记忆
 
 > 记**环境侧**的事实：某个服务在哪、某个命令会怎么失败、某个任务有固定套路。
 > 由 Agent 自动维护（指令见 \`prompts/memory.md\`），你也可以直接编辑这个文件。
@@ -113,8 +140,13 @@ export const MEMORY_FILE_TEMPLATE = `# Agent 记忆
 > \`\`\`
 `;
 
-/** `data/memory/USER.md` 的模板 —— 用户侧画像 */
-export const USER_FILE_TEMPLATE = `# 用户画像
+/**
+ * ⚠️ **旧模板（已废弃）** —— `data/memory/USER.md` 的出厂头注。
+ *
+ * 📌 **理由同 `LEGACY_MEMORY_FILE_TEMPLATE`** —— 启动时摘掉，
+ *    保留用户自己写的条目（见 `src/config/ensure.ts`）。
+ */
+export const LEGACY_USER_FILE_TEMPLATE = `# 用户画像
 
 > 记**用户侧**的信息：偏好、身份、沟通习惯、技术水平。
 > 由 Agent 自动维护（指令见 \`prompts/memory.md\`），你也可以直接编辑这个文件。

@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DIRS, FILES } from './paths.js';
 import {
@@ -9,6 +9,8 @@ import {
   DEFAULT_SUMMARY_PROMPT,
   DEFAULT_SYSTEM_PROMPT,
   DEFAULT_TOOL_PROMPT,
+  LEGACY_MEMORY_FILE_TEMPLATE,
+  LEGACY_USER_FILE_TEMPLATE,
   MEMORY_FILE_TEMPLATE,
   PRICING_FILE_TEMPLATE,
   USER_FILE_TEMPLATE,
@@ -40,6 +42,8 @@ function writeIfMissing(path: string, content: string): boolean {
 export interface EnsureResult {
   /** 本次新建的文件（相对项目根） */
   created: string[];
+  /** 本次**摘掉旧出厂头注**的文件（记忆文件） */
+  stripped: string[];
 }
 
 /**
@@ -54,6 +58,52 @@ const fallbackCreated: string[] = [];
 /** 这次启动用兜底模板写回的文件（**提示词 / 人格**，不含 data/ 下的运行时文件） */
 export function fallbackCreatedFiles(): string[] {
   return [...fallbackCreated];
+}
+
+/**
+ * 摘掉记忆文件里的**旧出厂头注**。
+ *
+ * 📌 **为什么** —— 2026-11-01 起，记忆文件**不再自带「条目格式」头注**：
+ * 那段样板长得像一条真记忆（会误导人），还白占字符预算
+ * （`USER.md` 上限 1375 字符，头注就吃掉三分之一）。
+ *
+ * ⚠️ **只摘「文件开头正好是旧模板」的情况** ——
+ *   用户自己写的头注一律保留（`renderMemoryFile` 的「文件头原样保留」约定）。
+ * ⚠️ **条目不动** —— 旧模板后面的内容原样留下。
+ */
+function stripLegacyMemoryHeader(path: string, legacy: string): boolean {
+  if (!existsSync(path)) return false;
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch {
+    return false;
+  }
+  if (!raw.startsWith(legacy)) return false;
+
+  const rest = raw.slice(legacy.length).trim();
+  // ⚠️ **原子写** —— 记忆文件损坏 = 用户全部记忆丢失
+  const tmp = `${path}.tmp-${process.pid}`;
+  try {
+    writeFileSync(tmp, rest, 'utf8');
+    renameSync(tmp, path);
+  } catch (err) {
+    try {
+      if (existsSync(tmp)) unlinkSync(tmp);
+    } catch {
+      // 清理失败就算了 —— 真正的错误在下面报
+    }
+    // ⚠️ **失败不挡住启动** —— 头注只是样板文字，
+    //   摘不掉也照常跑（顶多文件里还留着它）
+    console.warn(
+      `[Atlas] 移除旧出厂头注失败（不影响启动）：${path} —— ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  }
+  return true;
 }
 
 /** 确保出厂/运行时文件存在。返回新建了哪些。 */
@@ -87,5 +137,15 @@ export function ensureFiles(): EnsureResult {
     if (writeIfMissing(path, content)) created.push(path);
   }
 
-  return { created };
+  // ── 记忆文件：摘掉旧出厂头注（2026-11-01 起不再生成）──
+  const stripped: string[] = [];
+  const legacyHeaders: Array<[string, string]> = [
+    [join(DIRS.memory, 'MEMORY.md'), LEGACY_MEMORY_FILE_TEMPLATE],
+    [join(DIRS.memory, 'USER.md'), LEGACY_USER_FILE_TEMPLATE],
+  ];
+  for (const [path, legacy] of legacyHeaders) {
+    if (stripLegacyMemoryHeader(path, legacy)) stripped.push(path);
+  }
+
+  return { created, stripped };
 }

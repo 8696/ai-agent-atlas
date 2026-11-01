@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { writeFileSync } from 'node:fs';
 import { useTempDatabase } from '../fixtures/db';
 
 /**
@@ -24,7 +25,7 @@ const { initDatabase } = await import('../../src/db');
 const { umzug } = await import('../../scripts/migrate');
 const { addMemory, archiveMemory, clearMemory, deleteMemory, editMemory } =
   await import('../../src/services/memory/index.js');
-const { parseMemoryFile, renderMemoryFile, readMemory } =
+const { parseMemoryFile, renderMemoryFile, readMemory, memoryPath } =
   await import('../../src/services/memory/store.js');
 const { buildMemorySection, pickMemories } = await import('../../src/services/memory/inject.js');
 
@@ -137,12 +138,26 @@ describe('记忆的增删改', () => {
     expect(readMemory('USER').entries).toHaveLength(0);
   });
 
-  it('清空 → 只剩文件头', () => {
+  it('清空 → 文件变空（出厂不再留头注）', () => {
     addMemory({ file: 'MEMORY', name: 'a', body: '甲' });
     clearMemory('MEMORY');
     const content = readMemory('MEMORY');
     expect(content.entries).toHaveLength(0);
-    expect(content.header).toContain('# Agent 记忆');
+    // 📌 **出厂头注已经去掉** —— 文件里只剩条目
+    expect(content.header.trim()).toBe('');
+  });
+
+  it('清空 → 用户自己写的头注保留', () => {
+    // 📌 **头注是用户的** —— 出厂不写，但用户写了就得留着
+    writeFileSync(
+      memoryPath('MEMORY'),
+      '# 我自己的说明\n\n## keep-me\n- kind: fact\n- confidence: 0.9\n- source: manual\n- updated: 2026-11-01\n- status: active\n\n一条记忆\n',
+      'utf8',
+    );
+    clearMemory('MEMORY');
+    const content = readMemory('MEMORY');
+    expect(content.entries).toHaveLength(0);
+    expect(content.header).toContain('# 我自己的说明');
   });
 });
 

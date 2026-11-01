@@ -146,7 +146,7 @@ describe('memory_forget 工具（永久删除）', () => {
     expect(readMemory('USER').entries).toHaveLength(0);
   });
 
-  it('clear → 清空条目（文件头保留）', async () => {
+  it('clear → 清空条目', async () => {
     await memoryTool.invoke(
       { action: 'add', file: 'MEMORY', name: 'db-port', body: '数据库在 5432' },
       { sessionId: 's1' },
@@ -159,8 +159,8 @@ describe('memory_forget 工具（永久删除）', () => {
 
     const content = readMemory('MEMORY');
     expect(content.entries).toHaveLength(0);
-    // 📌 **文件头保留** —— 用户写过的说明不该被清掉
-    expect(content.header.trim()).not.toBe('');
+    // 📌 **出厂不留头注** —— 文件里只剩条目
+    expect(content.header.trim()).toBe('');
   });
 
   it('⚠️ delete 不存在的条目 → 明确报错', async () => {

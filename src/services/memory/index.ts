@@ -108,7 +108,7 @@ export function deleteMemory(file: MemoryFile, name: string): MemoryOpResult {
     : { ok: false, message: result.reason ?? '删除失败' };
 }
 
-/** 清空一个文件（**保留文件头**） */
+/** 清空一个文件（**保留用户自己写的文件头** —— 出厂不带头注了） */
 export function clearMemory(file: MemoryFile): MemoryOpResult {
   const result = clearMemoryEntries(file, { audit: true });
   return result.ok
