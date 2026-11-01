@@ -33,6 +33,9 @@ const SOURCE_RANK: Record<string, number> = { manual: 1, auto: 0 };
  */
 export function pickMemories(query: string): MemoryPick[] {
   const picks: MemoryPick[] = [];
+  // ⚠️ **相关性排序可以关** —— `MEMORY_RELEVANCE_ENABLED=false` 时
+  //    全部按 0 分算，排序只剩优先级（来源 > 置信度 > 更新时间）
+  const useRelevance = config.MEMORY_RELEVANCE_ENABLED;
 
   for (const file of MEMORY_FILES) {
     const content = readMemory(file);
@@ -42,7 +45,7 @@ export function pickMemories(query: string): MemoryPick[] {
       picks.push({
         file,
         entry,
-        score: scoreRelevance(query, [entry.name, entry.body]),
+        score: useRelevance ? scoreRelevance(query, [entry.name, entry.body]) : 0,
       });
     }
   }

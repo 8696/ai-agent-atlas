@@ -68,10 +68,17 @@ export async function prepareNode(state: {
 
   // ── 跨会话检索（**要调一次模型** —— 没命中就不调） ──
   let retrieval = '';
-  try {
-    retrieval = await buildRetrievalSection(query);
-  } catch (err) {
-    logger.warn({ err }, '跨会话检索失败 —— 跳过这一段');
+  // ⚠️ **子代理不查跨会话检索** ——
+  //    检索查的是 `messages` 表（**含主会话的消息**），
+  //    命中后还会折成摘要塞进子代理的上下文 ——
+  //    那等于把主对话的历史又喂给了子代理，「隔离上下文」就漏了
+  //    （见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
+  if (!state.isolated) {
+    try {
+      retrieval = await buildRetrievalSection(query);
+    } catch (err) {
+      logger.warn({ err }, '跨会话检索失败 —— 跳过这一段');
+    }
   }
 
   // ── 技能匹配（**走 FTS5** —— 命中的技能正文进上下文） ──

@@ -6,6 +6,7 @@ import { logger } from '../logger.js';
 import { writeAudit } from '../lib/audit.js';
 import { createChatModel, resolveModel } from '../services/model.js';
 import { recordUsage, usageOf } from '../services/cost.js';
+import { recordToolCall } from '../services/tool-log.js';
 import { readTextFile } from '../services/prompt.js';
 import { toLangChainTools } from '../tools/registry.js';
 import { createSkill, getSkill, updateSkill } from './store.js';
@@ -198,8 +199,25 @@ export async function runSkillAutocreate(input: {
     if (!result.ok) {
       await writeAudit('SKILL_AUTOCREATED', 'skill', name, { rejected: true, reason: result.reason });
       logger.warn({ name, reason: result.reason }, '自动沉淀的技能被拒绝写入');
+      await recordToolCall({
+        toolName: 'skill_create',
+        source: 'skill',
+        status: 'rejected',
+        args: { name, description },
+        error: result.reason ?? '写入被拒',
+      });
       return none(result.reason ?? '写入被拒');
     }
+    // 📌 **也要记流水** —— 自动沉淀不走工具执行层，
+    //    不记的话「工具调用流水」就漏了这条（见 [12-c C6](../docs/12-c-需求-工具技能与扩展.md)）
+    await recordToolCall({
+      toolName: 'skill_create',
+      source: 'skill',
+      status: 'success',
+      args: { name, description },
+      output: `已创建技能「${name}」（自动沉淀）`,
+      requiresConfirmation: false,
+    });
     logger.info({ name }, '自动沉淀了一个技能');
     return { created: name, updated: null, note: '已创建' };
   }
@@ -216,8 +234,24 @@ export async function runSkillAutocreate(input: {
     if (!result.ok) {
       await writeAudit('SKILL_AUTOUPDATED', 'skill', name, { rejected: true, reason: result.reason });
       logger.warn({ name, reason: result.reason }, '自动更新的技能被拒绝写入');
+      await recordToolCall({
+        toolName: 'skill_update',
+        source: 'skill',
+        status: 'rejected',
+        args: { name },
+        error: result.reason ?? '写入被拒',
+      });
       return none(result.reason ?? '写入被拒');
     }
+    // 📌 **也要记流水** —— 同上（见 [12-c C6](../docs/12-c-需求-工具技能与扩展.md)）
+    await recordToolCall({
+      toolName: 'skill_update',
+      source: 'skill',
+      status: 'success',
+      args: { name },
+      output: `已更新技能「${name}」（自动沉淀）`,
+      requiresConfirmation: false,
+    });
     logger.info({ name }, '自动更新了一个技能');
     return { created: null, updated: name, note: '已更新' };
   }

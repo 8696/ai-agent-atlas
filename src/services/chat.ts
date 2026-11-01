@@ -3,7 +3,7 @@ import { getGraph } from '../agent/graph.js';
 import type { PendingConfirm } from '../agent/state.js';
 import type { ToolCard } from '../agent/tool-node.js';
 import { toLangChainMessages, type IncomingUiMessage } from './chat-messages.js';
-import { waitForDecision, type PendingDecision } from './pending-confirm.js';
+import { clearPending, waitForDecision, type PendingDecision } from './pending-confirm.js';
 
 /**
  * 对话编排 —— **图驱动的入口**（见 [12-b B3 ~ B6](../docs/12-b-需求-对话与编排.md)）。
@@ -112,17 +112,20 @@ export async function* streamChatTurn(options: ChatTurnOptions): AsyncGenerator<
   const graph = getGraph();
   const threadId = options.sessionId ?? options.messageId;
 
-  // ⚠️ **外部带进来的决定**（恢复模式：后端重启后由确认端点送进来）——
-  //    **只用于第一次挂起**；之后每一次挂起都要重新问用户
-  let externalResume = options.resume;
-  let input: unknown =
-    options.resume !== undefined
-      ? new Command({ resume: options.resume })
-      : {
-          turnMessages: toLangChainMessages(options.messages ?? []),
-          sessionId: options.sessionId ?? '',
-          messageId: options.messageId,
-        };
+  // ⚠️ **恢复模式**（后端重启后由确认端点送进来）
+  //
+  // 📌 **一次恢复只解决一个挂起** ——
+  //    `options.resume` 由下面的 `Command` 带给图，**不能再留一份**给下一个挂起。
+  //    留着的话：用户批准了危险工具 A，同一轮里的危险工具 B 会**直接拿到 A 的批准**，
+  //    用户从没就 B 作答过（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）。
+  const resuming = options.resume !== undefined;
+  let input: unknown = resuming
+    ? new Command({ resume: options.resume })
+    : {
+        turnMessages: toLangChainMessages(options.messages ?? []),
+        sessionId: options.sessionId ?? '',
+        messageId: options.messageId,
+      };
 
   for (;;) {
     let interrupted: PendingConfirm | undefined;
@@ -158,20 +161,34 @@ export async function* streamChatTurn(options: ChatTurnOptions): AsyncGenerator<
     //
     // ⚠️ **每一次挂起都要登记** —— 一轮里可能有**第二个**危险工具，
     //    那一次也要能等用户点（否则会永远挂着）
-    const waiters: Array<Promise<PendingDecision>> = [waitForDecision(threadId, interrupted)];
+    const waiters: Array<Promise<PendingDecision>> = [];
+    // 📌 **恢复模式不登记** —— 那一轮只解决这一个挂起，
+    //    下一个批准要走新的 HTTP 请求（登记了也没人接）
+    if (!resuming) waiters.push(waitForDecision(threadId, interrupted));
     const aborted = abortRace(options.signal);
     if (aborted) waiters.push(aborted);
 
     // ── 挂起：告诉前端「要你确认」 ──
     yield { type: 'pending-confirm', payload: interrupted };
 
+    // ⚠️ **恢复模式：这一轮只解决这一个挂起** ——
+    //    后面还有挂起就**结束这一轮**，把卡片交给前端再问一次
+    //    （批准要走另一个 HTTP 请求 —— 在这儿死等会把那个请求挂住）。
+    //    📌 **绝不沿用上一个批准** —— 用户批准的是工具 A，工具 B 从没被问过。
+    if (resuming) break;
+
     // ⚠️ **等用户的决定** —— 原来的请求不关掉，
     //    批准后同一个流继续往下走（用户看到的是一条消息，不是两条）
-    //
-    // 📌 **外部带进来的决定只用于第一次**（`options.resume`）——
-    //    之后每一次挂起都要重新问用户
-    const decision = externalResume ?? (await Promise.race(waiters));
-    externalResume = undefined;
+    let decision: PendingDecision;
+    try {
+      decision = await Promise.race(waiters);
+    } catch (err) {
+      // ⚠️ **流断了就把登记撤掉** —— 不撤的话，
+      //    用户之后点批准会走「有人在等」那条路，而那条流已经死了，
+      //    批准就**被吞掉**（工具永远不执行，用户还以为批了）
+      clearPending(threadId);
+      throw err;
+    }
 
     input = new Command({ resume: decision });
   }

@@ -92,7 +92,16 @@ async function main(): Promise<void> {
     }
 
     // 📌 **解析一次，存下来** —— 不每次重解析
-    const expression = await parseScheduleToCron(schedule);
+    // ⚠️ **解析不出来也要把任务建出来** —— **原文保留在任务里**，
+    //    用户改完 `data/cron.json` 里这条任务的 `cron` 字段就能启用；
+    //    直接抛错的话这条任务就**整个丢了**（用户白写一遍）
+    let expression = '';
+    let parseError = '';
+    try {
+      expression = await parseScheduleToCron(schedule);
+    } catch (err) {
+      parseError = err instanceof Error ? err.message : String(err);
+    }
 
     const sessionId = args.session ?? (await createSession({ title: `定时任务 · ${args.name ?? schedule}` })).id;
 
@@ -103,7 +112,17 @@ async function main(): Promise<void> {
       prompt,
       sessionId,
       autoApprove: args.autoApprove,
+      // ⚠️ **解析失败 → 建好但先不启用** —— 别让它每分钟去撞一次不存在的表达式
+      ...(parseError ? { enabled: false } : {}),
+      ...(parseError ? { lastError: parseError } : {}),
     });
+
+    if (parseError) {
+      console.error(`⚠️ 周期描述解析失败：${parseError}`);
+      console.error(`   任务**已建好但未启用** —— 原文保留在 \`${schedule}\` 里`);
+      console.error(`   改 \`data/cron.json\` 里这条任务的 \`cron\` 字段就能启用（任务 id：${task.id}）`);
+      return;
+    }
 
     console.info(`已加定时任务：${task.id}`);
     console.info(describeCronTask(task));

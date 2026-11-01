@@ -153,6 +153,16 @@ export function maskValue(value: unknown, depth = 0): unknown {
   if (typeof value === 'string') return maskString(value);
   if (value === null || typeof value !== 'object') return value;
 
+  // ⚠️ **Error 要单独处理** —— `message` / `stack` 是**不可枚举属性**，
+  //    直接递归会把错误信息整个抹掉（变成 `{}`）
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: maskString(value.message),
+      ...(value.stack ? { stack: maskString(value.stack) } : {}),
+    };
+  }
+
   if (Array.isArray(value)) {
     return value.map((item) => maskValue(item, depth + 1));
   }

@@ -313,6 +313,8 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       ...(options.signal ? { signal: options.signal } : {}),
       // 📌 **带上调用 id** —— 子代理靠它算稳定的 thread_id
       toolCallId: call.id,
+      // 📌 **注入命中的特征要传进去** —— 沙箱里的 RPC 调用要在自己的闸上再判一次
+      ...(options.injection?.detected ? { injectionMatches: options.injection.matches } : {}),
     });
   } catch (err) {
     // ⚠️ **图中断不能吞** —— 它是「挂起等确认」的机制。

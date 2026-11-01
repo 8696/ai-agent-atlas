@@ -4,6 +4,11 @@ import { z } from 'zod';
 import { config } from '../../config.js';
 import { paths } from '../../config.js';
 import { matchBlacklist } from '../../lib/security/blacklist.js';
+import {
+  protectedWriteTargets,
+  restoreContextFiles,
+  snapshotContextFiles,
+} from '../../lib/security/context-files.js';
 import { toolEnv } from '../../lib/security/env.js';
 import { resolveInWorkspace } from '../../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../args.js';
@@ -70,6 +75,21 @@ export const shellTool: ToolDefinition = {
     const timeoutMs = input.timeoutMs ?? config.TOOL_TIMEOUT_MS;
     const isWindows = platform() === 'win32';
 
+    // ⚠️ **上下文文件只读** —— 人格（`SOUL*.md`）/ 项目指令（`AGENTS.md`）/
+    //    提示词（`prompts/*.md`）**不能被命令改掉**
+    //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
+    //    文件工具的路径沙箱管不到命令内容，所以这一层单独兜住。
+    const writeTargets = protectedWriteTargets(command, cwd);
+    if (writeTargets.length > 0) {
+      const message =
+        `命令试图改写上下文文件（${writeTargets.join('、')}）—— ` +
+        '人格与项目指令只读，不允许通过 shell 改写';
+      return { ok: false, output: message, error: `CONTEXT_FILE_WRITE_BLOCKED: ${message}` };
+    }
+
+    // 📌 **跑之前拍快照** —— 跑完核对，被改了要还原
+    const contextSnapshot = snapshotContextFiles();
+
     const started = Date.now();
     const result = await new Promise<{
       code: number | null;
@@ -120,17 +140,25 @@ export const shellTool: ToolDefinition = {
 
     const duration = Date.now() - started;
 
+    // ⚠️ **事后核对** —— 事前那道拦不住的形态（`python -c "open(...)"` 之类）
+    //    靠这一步兜住：被改了就地还原，并**如实告诉模型**
+    const restored = restoreContextFiles(contextSnapshot);
+    const restoreNote =
+      restored.length > 0
+        ? `\n\n⚠️ 这条命令改动了上下文文件（${restored.join('、')}），已还原 —— 那条路径不要再走。`
+        : '';
+
     if (result.spawnError) {
       return {
         ok: false,
-        output: `命令启动失败：${result.spawnError}`,
+        output: `命令启动失败：${result.spawnError}${restoreNote}`,
         error: `SPAWN_FAILED: ${result.spawnError}`,
       };
     }
     if (result.timedOut) {
       return {
         ok: false,
-        output: `命令超时（${timeoutMs}ms），已杀掉`,
+        output: `命令超时（${timeoutMs}ms），已杀掉${restoreNote}`,
         error: `TIMEOUT: 命令超时（${timeoutMs}ms）`,
       };
     }
@@ -143,7 +171,7 @@ export const shellTool: ToolDefinition = {
     if (exitCode !== 0) {
       return {
         ok: false,
-        output: `${header}${clipped.text}`,
+        output: `${header}${clipped.text}${restoreNote}`,
         error: `EXIT_CODE_${exitCode}`,
         data: { exitCode, durationMs: duration, cwd },
         truncated: clipped.truncated,
@@ -153,7 +181,7 @@ export const shellTool: ToolDefinition = {
 
     return {
       ok: true,
-      output: `${header}${clipped.text || '(没有输出)'}`,
+      output: `${header}${clipped.text || '(没有输出)'}${restoreNote}`,
       data: { exitCode, durationMs: duration, cwd },
       truncated: clipped.truncated,
       originalLength: clipped.originalLength,

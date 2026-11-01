@@ -1,5 +1,7 @@
 import { Annotation, messagesStateReducer } from '@langchain/langgraph';
 import type { BaseMessage } from '@langchain/core/messages';
+// 📌 **只导类型** —— 编译期擦掉，不会引入运行期依赖
+import type { UsageScope } from '../models/cost-log.model.js';
 
 /**
  * 图状态 —— **集中在 `agent/state.ts`**（见 [03-b §B.5.2](../docs/03-b-技术栈-后端栈.md)）。
@@ -149,6 +151,18 @@ export const AtlasState = Annotation.Root({
   isolated: Annotation<boolean>({
     reducer: (_current, update) => update ?? false,
     default: () => false,
+  }),
+
+  /**
+   * 这一轮的用量归到哪个桶（**`cost_logs.usage_scope`**）。
+   *
+   * ⚠️ **默认 `chat`** —— 定时任务会传 `cron`，
+   *    这样「定时任务花了多少」在 `yarn cost:report` 里单独看得见
+   *    （见 [12-b B11](./12-b-需求-对话与编排.md)）。
+   */
+  usageScope: Annotation<UsageScope>({
+    reducer: (_current, update) => update ?? 'chat',
+    default: () => 'chat',
   }),
 
   /**

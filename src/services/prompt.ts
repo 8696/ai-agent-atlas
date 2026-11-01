@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { config } from '../config.js';
 import { DIRS, FILES, PROJECT_ROOT } from '../config/paths.js';
+import { fallbackCreatedFiles } from '../config/ensure.js';
 
 /**
  * 提示词与上下文文件 —— **每轮读文件，不缓存**（见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
@@ -15,6 +16,8 @@ import { DIRS, FILES, PROJECT_ROOT } from '../config/paths.js';
 export const KNOWN_PLACEHOLDERS = [
   'date',
   'tools',
+  'tool',
+  'language',
   'skills',
   'memories',
   'retrieval',
@@ -130,19 +133,70 @@ export function personalityPath(name: string | undefined): string {
 }
 
 /**
+ * 工具使用规范（`prompts/tool.md`）—— **每轮读，不缓存**。
+ *
+ * ⚠️ **空了就整段不出现** —— 少这段照样能跑，只是没了调用纪律的约束。
+ */
+export function readToolInstructions(): string {
+  return readTextFile(join(DIRS.prompts, 'tool.md')).trim();
+}
+
+/**
+ * 「用了兜底提示词」的提示语 —— **一切正常时返回空串**。
+ *
+ * ⚠️ **不要静默降级** —— 兜底模板很短（"够跑就行"），
+ * 用户不知道就以为用的是仓库里的完整出厂版 → 行为变差却找不到原因
+ * （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
+ */
+export function promptFallbackNotice(): string {
+  const files = fallbackCreatedFiles();
+  if (files.length === 0) return '';
+  const names = files.map((file) => file.replace(`${PROJECT_ROOT}/`, ''));
+  return (
+    `⚠️ 用了兜底提示词：${names.join('、')} 缺失，启动时已用出厂兜底模板写回。` +
+    '兜底模板很短，行为会比仓库里的完整版本差 —— 建议 git checkout 还原这些文件'
+  );
+}
+
+/**
+ * 回复语言指令（`.env` 的 `SYSTEM_LANGUAGE`）—— **每轮拼上**。
+ *
+ * ⚠️ **这个 key 的语义要写清楚**：它管的是 **Agent 回复用什么语言**，
+ * 不是界面语言 —— 界面文案是写死的中文（前端没有设置页，见 [04-c](../docs/04-c-ui-配置入口.md)）。
+ *
+ * 📌 **默认 `zh-CN`** —— 与出厂提示词（中文）一致。
+ */
+export function languageInstruction(): string {
+  const lang = config.SYSTEM_LANGUAGE.trim();
+  if (lang === '') return '';
+  return `## 回复语言\n\n用 **${lang}** 回复用户（语言由 \`.env\` 的 \`SYSTEM_LANGUAGE\` 决定）。`;
+}
+
+/**
  * 组装系统提示词 = **人格（`SOUL.md`）+ 系统提示词（`prompts/system.md`）**。
  *
  * 📌 **`AGENTS.md`（项目指令）走 `{{agents}}` 占位符** ——
  * 它是「这个项目的规矩」，跟「你是谁」（人格）是两回事，
  * 所以单独一段，不跟 `SOUL.md` 混在一起。
+ *
+ * 📌 **`prompts/tool.md`（工具使用规范）走 `{{tool}}` 占位符** ——
+ * ⚠️ **模板里没写 `{{tool}}` 也会注入**（追加到末尾）——
+ * 用户改过 `system.md` 的话，只靠占位符会让 `tool.md`
+ * 又变回「写了没人读」的文件（见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）。
  */
 export function buildSystemPrompt(ctx: PromptContext = {}): string {
   const soul = readTextFile(personalityPath(ctx.personality)).trim();
   const system = readTextFile(join(DIRS.prompts, 'system.md')).trim();
+  const tool = readToolInstructions();
+  const language = languageInstruction();
 
   const rendered = renderTemplate(system, {
     date: ctx.date ?? today(),
     tools: ctx.tools ?? '（本期尚未接入工具）',
+    // 📌 **工具使用规范** —— `prompts/tool.md` 的正文
+    tool,
+    // 📌 **回复语言** —— `.env` 的 `SYSTEM_LANGUAGE`
+    language,
     // ⚠️ **技能段为空就整段不出现** —— 不要留「（暂无）」这种占位
     skills: ctx.skills ?? '',
     memories: ctx.memories ?? '（暂无）',
@@ -152,5 +206,10 @@ export function buildSystemPrompt(ctx: PromptContext = {}): string {
     agents: ctx.agents ?? '',
   });
 
-  return [soul, rendered].filter(Boolean).join('\n\n---\n\n');
+  const sections = [soul, rendered];
+  // ⚠️ **模板没写 `{{tool}}` 也要注入** —— 否则 `tool.md` 会重新变成哑巴文件
+  if (tool && !system.includes('{{tool}}')) sections.push(tool);
+  // ⚠️ **同上** —— `SYSTEM_LANGUAGE` 不能因为模板被改过就失效
+  if (language && !system.includes('{{language}}')) sections.push(language);
+  return sections.filter(Boolean).join('\n\n---\n\n');
 }

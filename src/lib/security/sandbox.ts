@@ -1,5 +1,5 @@
 import { realpathSync } from 'node:fs';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { FILES } from '../../config/paths.js';
 
 /**
@@ -140,6 +140,44 @@ export function resolveInWorkspace(
 }
 
 /**
+ * 解析路径，但**最后一段的软链不解开** —— **删除操作用这个**。
+ *
+ * ⚠️ **为什么** —— `resolveInWorkspace` 会把整条路径的软链都解开，
+ *    于是「删一个软链」实际删掉的是**它指向的东西**（工作区里的真实文件）。
+ *    文档承诺的是「**软链只删链接本身**，不删它指向的东西」
+ *    （见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）。
+ *
+ * 📌 **只解开父目录** —— 父目录是软链的话照样解开（那是路径穿越的口子），
+ *    但**最后一段留着不动**（那才是「要删的东西」本身）。
+ */
+export function resolveInWorkspaceKeepLink(inputPath: string, workspaceRoot: string): string {
+  if (typeof inputPath !== 'string' || inputPath.trim() === '') {
+    throw new SandboxError('路径不能为空', 'INVALID_PATH');
+  }
+  if (inputPath.includes('\0')) {
+    throw new SandboxError('路径里有空字节', 'INVALID_PATH');
+  }
+
+  const root = realpathAllowMissing(workspaceRoot);
+  const absolute = isAbsolute(inputPath) ? resolve(inputPath) : resolve(root, inputPath);
+
+  // ── 拆成「父目录 + 文件名」 ──
+  const parent = dirname(absolute);
+  const name = basename(absolute);
+  // 📌 **父目录照样解软链** —— 路径穿越的口子在那儿
+  const realParent = realpathAllowMissing(parent);
+  const kept = join(realParent, name);
+
+  if (!isInside(root, kept)) {
+    throw new SandboxError(
+      `路径超出工作区（${kept}）—— 只能访问 ${root} 内的文件`,
+      'PATH_OUTSIDE_WORKSPACE',
+    );
+  }
+  return kept;
+}
+
+/**
  * 工作区根目录本身（**永远不许被删**）。
  *
  * ⚠️ **软链也要解开** —— 否则工作区里放一个指向根目录的软链就能把根删了。
@@ -154,8 +192,10 @@ export function assertNotWorkspaceRoot(target: string, workspaceRoot: string): v
 /** 把绝对路径换回**工作区内的相对路径**（给模型看 —— 绝对路径泄露目录结构） */
 export function toWorkspaceRelative(target: string, workspaceRoot: string): string {
   const root = realpathAllowMissing(workspaceRoot);
-  // ⚠️ **目标也要解开软链** —— macOS 的临时目录本身就是软链（`/var` → `/private/var`）
-  const rel = relative(root, realpathAllowMissing(target));
+  // 📌 **只解父目录的软链** —— 最后一段要是软链，解了就变成「它指向的东西」
+  //    （macOS 的临时目录本身就是软链（`/var` → `/private/var`）—— 父目录那层要解）
+  const parent = realpathAllowMissing(dirname(target));
+  const rel = relative(root, join(parent, basename(target)));
   if (rel === '' || rel.startsWith('..')) return target;
   return rel.split(sep).join('/');
 }

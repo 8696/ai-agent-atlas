@@ -42,6 +42,20 @@ export interface EnsureResult {
   created: string[];
 }
 
+/**
+ * 这次启动用**兜底模板**写回的文件（**提示词 / 人格**）。
+ *
+ * ⚠️ **要记下来** —— 兜底模板很短（"够跑就行"），
+ * 用户不知道就以为用的是仓库里的完整出厂版 → 行为变差却找不到原因
+ * （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md) 的「不要静默降级」）。
+ */
+const fallbackCreated: string[] = [];
+
+/** 这次启动用兜底模板写回的文件（**提示词 / 人格**，不含 data/ 下的运行时文件） */
+export function fallbackCreatedFiles(): string[] {
+  return [...fallbackCreated];
+}
+
 /** 确保出厂/运行时文件存在。返回新建了哪些。 */
 export function ensureFiles(): EnsureResult {
   const created: string[] = [];
@@ -56,7 +70,10 @@ export function ensureFiles(): EnsureResult {
     [FILES.soul, DEFAULT_SOUL],
   ];
   for (const [path, content] of promptFiles) {
-    if (writeIfMissing(path, content)) created.push(path);
+    if (writeIfMissing(path, content)) {
+      created.push(path);
+      fallbackCreated.push(path);
+    }
   }
 
   // ── 运行时文件（data/ 下，不进 git）──

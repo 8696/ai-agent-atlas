@@ -5,6 +5,11 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { matchBlacklist } from '../lib/security/blacklist.js';
+import {
+  protectedWriteTargets,
+  restoreContextFiles,
+  snapshotContextFiles,
+} from '../lib/security/context-files.js';
 import { toolEnv } from '../lib/security/env.js';
 import { isInside, realpathAllowMissing } from '../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../tools/args.js';
@@ -232,6 +237,19 @@ export async function runSkillScript(
     return { ok: false, output: message, error: `COMMAND_BLOCKED: ${message}` };
   }
 
+  // ⚠️ **上下文文件只读** —— 脚本同样不能改掉人格 / 项目指令 / 提示词
+  //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）
+  const writeTargets = protectedWriteTargets(content, skillRoot);
+  if (writeTargets.length > 0) {
+    const message =
+      `脚本试图改写上下文文件（${writeTargets.join('、')}）—— ` +
+      '人格与项目指令只读，不允许通过脚本改写';
+    return { ok: false, output: message, error: `CONTEXT_FILE_WRITE_BLOCKED: ${message}` };
+  }
+
+  // 📌 **跑之前拍快照** —— 跑完核对，被改了要还原
+  const contextSnapshot = snapshotContextFiles();
+
   const args = splitArgs(argsText);
   const interpreter = interpreterFor(real);
   const isWindows = platform() === 'win32';
@@ -294,17 +312,24 @@ export async function runSkillScript(
 
   const duration = Date.now() - started;
 
+  // ⚠️ **事后核对** —— 事前拦不住的形态靠这一步兜住
+  const restored = restoreContextFiles(contextSnapshot);
+  const restoreNote =
+    restored.length > 0
+      ? `\n\n⚠️ 这个脚本改动了上下文文件（${restored.join('、')}），已还原 —— 那条路径不要再走。`
+      : '';
+
   if (outcome.spawnError) {
     return {
       ok: false,
-      output: `脚本启动失败：${outcome.spawnError}`,
+      output: `脚本启动失败：${outcome.spawnError}${restoreNote}`,
       error: `SPAWN_FAILED: ${outcome.spawnError}`,
     };
   }
   if (outcome.timedOut) {
     return {
       ok: false,
-      output: `脚本超时（${timeoutMs}ms），已杀掉`,
+      output: `脚本超时（${timeoutMs}ms），已杀掉${restoreNote}`,
       error: `TIMEOUT: 脚本超时（${timeoutMs}ms）`,
     };
   }
@@ -317,7 +342,7 @@ export async function runSkillScript(
   if (exitCode !== 0) {
     return {
       ok: false,
-      output: `${header}${clipped.text}`,
+      output: `${header}${clipped.text}${restoreNote}`,
       error: `EXIT_CODE_${exitCode}`,
       data: { exitCode, durationMs: duration, script: scriptPath },
       truncated: clipped.truncated,
@@ -327,7 +352,7 @@ export async function runSkillScript(
 
   return {
     ok: true,
-    output: `${header}${clipped.text || '(没有输出)'}`,
+    output: `${header}${clipped.text || '(没有输出)'}${restoreNote}`,
     data: { exitCode, durationMs: duration, script: scriptPath },
     truncated: clipped.truncated,
     originalLength: clipped.originalLength,

@@ -270,12 +270,16 @@ export async function compressSession(
  * 按下标裁会裁错位置。id 对不上时退回到「按条数裁」。
  */
 export function trimByBoundary(messages: BaseMessage[], state: SummaryState): BaseMessage[] {
-  if (!state.summary) return messages;
-
+  // ⚠️ **边界优先于摘要** —— `/reset` 会把摘要清空、但把边界设到最后一条消息
+  //    （意思是「之前的对话都不算」）。
+  //    以前这里是 `if (!state.summary) return messages` —— 摘要一清就直接返回全部历史，
+  //    `/reset` 于是**根本不生效**（见 [12-b B9](../docs/12-b-需求-对话与编排.md)）
   if (state.boundary) {
     const index = messages.findIndex((message) => message.id === state.boundary);
     if (index >= 0) return messages.slice(index + 1);
   }
+
+  if (!state.summary) return messages;
 
   if (state.count > 0 && state.count < messages.length) {
     return messages.slice(state.count);

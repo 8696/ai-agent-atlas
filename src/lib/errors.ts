@@ -23,7 +23,9 @@ export class AppError extends Error {
 
   /** 统一的响应体 */
   toBody(): { error: { code: string; message: string } } {
-    return { error: { code: this.code, message: this.message } };
+    // ⚠️ **message 也要过打码** —— 上游 SDK 偶尔把请求头塞进错误信息
+    //    （见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）
+    return { error: { code: this.code, message: sanitizeMessage(this.message) } };
   }
 }
 

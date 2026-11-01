@@ -37,6 +37,14 @@ export interface ToolContext {
    * 📌 **子代理靠它算稳定的 thread_id** —— 重跑时不能换。
    */
   toolCallId?: string | undefined;
+  /**
+   * 注入检测命中的特征（**空 = 没命中**）。
+   *
+   * 📌 **要传给工具** —— 沙箱里的 RPC 调用要在**自己的权限闸**上再判一次，
+   *    不然「注入命中 → 升档」在沙箱那条路上就是空的
+   *    （见 [10 §10.7](../../docs/10-安全方案.md)）。
+   */
+  injectionMatches?: string[] | undefined;
 }
 
 /** 工具执行结果 */

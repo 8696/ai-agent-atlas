@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { config, paths } from '../../config.js';
 import { logger } from '../../logger.js';
 import { decideTool, disabledTools } from '../../lib/security/policy.js';
+import type { InjectionScan } from '../../lib/security/injection.js';
 import { mcpPolicyLookup } from '../mcp/manager.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
@@ -57,7 +58,12 @@ const codeSchema = z.object({
 async function handleRpc(
   toolName: string,
   args: unknown,
-  context: { sessionId?: string | undefined; messageId?: string | undefined; signal?: AbortSignal | undefined },
+  context: {
+    sessionId?: string | undefined;
+    messageId?: string | undefined;
+    signal?: AbortSignal | undefined;
+    injectionMatches?: string[] | undefined;
+  },
 ): Promise<SandboxRpcResult> {
   const registry = getToolRegistry();
   const tool = registry.get(toolName);
@@ -74,12 +80,21 @@ async function handleRpc(
     return { ok: false, text: '', error: '沙箱里不能再调 execute_code' };
   }
 
+  // 📌 **注入命中 → 升档** —— 沙箱里的调用要在**自己的闸**上再判一次
+  //    （不传的话，「注入命中 → 工具档位收紧」在沙箱这条路上是空的 ——
+  //    见 [10 §10.7](../../docs/10-安全方案.md)）
+  const injection: InjectionScan = {
+    detected: (context.injectionMatches?.length ?? 0) > 0,
+    matches: context.injectionMatches ?? [],
+  };
+
   const decision = decideTool(tool, {
     env: config,
     disabled: disabledTools(config),
     mcpPolicy: mcpPolicyLookup,
     // 📌 **入参传进去** —— 命令黑名单在策略层判（见 [12-c C3](../docs/12-c-需求-工具技能与扩展.md)）
     args: args ?? {},
+    injection,
   });
   if (decision.decision !== 'allow') {
     return {
@@ -104,6 +119,8 @@ async function handleRpc(
     // 📌 **消息 id 加后缀** —— 流水里一眼看出这是脚本里调的
     ...(context.messageId ? { messageId: `${context.messageId}#exec` } : {}),
     ...(context.signal ? { signal: context.signal } : {}),
+    // 📌 **注入命中的特征要传下去** —— 统一入口那层也要升档
+    ...(injection.detected ? { injection } : {}),
     // ⚠️ **不发卡片** —— 中间步骤只在流水里，不进对话
   });
 

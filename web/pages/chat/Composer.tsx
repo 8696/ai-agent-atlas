@@ -14,9 +14,10 @@ import { useModelStore } from '../../lib/stores/modelStore';
  * | 停止   | 调 `chat.stop()`；已输出的内容保留          |
  *
  * 📌 **斜杠命令补全**（见 [12-b B9](../../docs/12-b-需求-对话与编排.md)）：
- * 输入 `/` 弹候选（命令 + 已装技能 + 人格），
+ * 输入 `/` 弹候选（命令 + 人格 + 模型），
  * `Tab` 补全 · `↑↓` 选择 · `Esc` 关闭。
  * ⚠️ **只是补全** —— 命令在服务端解析，前端不执行。
+ * ⚠️ **技能不进候选** —— 技能是 FTS5 匹配进上下文的，不是斜杠命令。
  */
 
 interface Props {
@@ -41,10 +42,11 @@ interface Candidate {
 export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
   const [value, setValue] = useState('');
   const [commands, setCommands] = useState<CommandInfo[]>([]);
-  const [skills, setSkills] = useState<string[]>([]);
   const [personalities, setPersonalities] = useState<string[]>([]);
   /** 当前选中的候选项下标（**-1 = 没开列表**） */
   const [active, setActive] = useState(-1);
+  /** 候选列表被 Esc 关掉了（**改输入才重开**） */
+  const [dismissed, setDismissed] = useState(false);
 
   // 📌 **模型名也在候选里**（`/model <名称>` 切换本会话的模型）
   const models = useModelStore((state) => state.models);
@@ -53,7 +55,8 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
     void fetchCommands()
       .then((data) => {
         setCommands(data.commands);
-        setSkills(data.skills);
+        // 📌 **技能不进候选** —— 服务端没有 `/技能名` 这个命令，
+        //    补出来发出去只会被回一句「未知命令」
         setPersonalities(data.personalities);
       })
       .catch(() => {
@@ -66,38 +69,52 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
   /**
    * 当前正在输入的命令（**行首是 `/` 才算**）。
    *
-   * 📌 **拿整个输入去筛候选** —— `/model glm` 这种带参数的也要能补全。
+   * 📌 **命令名与参数分开看** ——
+   * `/model g` 要能补出 `/model glm`，
+   * 所以拿**命令名**去筛命令、拿**参数**去筛参数。
    */
-  const query = value.trim().toLowerCase();
+  const trimmed = value.trim();
+  const spaceAt = trimmed.indexOf(' ');
+  const commandPart = (spaceAt >= 0 ? trimmed.slice(0, spaceAt) : trimmed).toLowerCase();
+  const argPart = spaceAt >= 0 ? trimmed.slice(spaceAt + 1).trim().toLowerCase() : '';
 
   /** 候选列表 */
   const candidates = useMemo<Candidate[]>(() => {
-    if (!query.startsWith('/')) return [];
+    if (!commandPart.startsWith('/')) return [];
     const out: Candidate[] = [];
+
+    // ── 命令名 ──
     for (const command of commands) {
       const item = `/${command.name}`;
-      if (!item.toLowerCase().startsWith(query)) continue;
+      if (!item.toLowerCase().startsWith(commandPart)) continue;
       out.push({ value: `${item} `, label: item, hint: command.summary });
     }
-    for (const skill of skills) {
-      const item = `/${skill}`;
-      if (!item.toLowerCase().startsWith(query)) continue;
-      out.push({ value: `${item} `, label: item, hint: '技能' });
-    }
-    for (const personality of personalities) {
-      const item = `/personality ${personality}`;
-      if (!item.toLowerCase().startsWith(query)) continue;
-      out.push({ value: item, label: personality, hint: '人格' });
-    }
-    for (const model of models) {
-      const item = `/model ${model.name}`;
-      if (!item.toLowerCase().startsWith(query)) continue;
-      out.push({ value: item, label: model.name, hint: '模型' });
-    }
-    return out.slice(0, 12);
-  }, [query, commands, skills, personalities, models]);
 
-  const open = candidates.length > 0;
+    // ── `/personality <文件名>` ──
+    if (commandPart === '/personality') {
+      for (const personality of personalities) {
+        if (!personality.toLowerCase().startsWith(argPart)) continue;
+        out.push({
+          value: `/personality ${personality}`,
+          label: personality,
+          hint: '人格',
+        });
+      }
+    }
+
+    // ── `/model <名称>` ──
+    if (commandPart === '/model') {
+      for (const model of models) {
+        if (!model.name.toLowerCase().startsWith(argPart)) continue;
+        out.push({ value: `/model ${model.name}`, label: model.name, hint: '模型' });
+      }
+    }
+
+    return out.slice(0, 12);
+  }, [commandPart, argPart, commands, personalities, models]);
+
+  // 📌 **Esc 关掉列表** —— 关了之后输入不变就一直关着（再改输入才重开）
+  const open = candidates.length > 0 && !dismissed;
 
   /** 选中某个候选 → 替换输入框里的内容 */
   const applyCandidate = (candidate: Candidate) => {
@@ -139,6 +156,8 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
         onChange={(event) => {
           setValue(event.target.value);
           setActive(-1);
+          // 📌 **改了输入就重新弹列表** —— Esc 关掉之后接着打字应该能再看到
+          setDismissed(false);
         }}
         onKeyDown={(event) => {
           // 📌 **上下键选候选** —— 只在列表开着时接管
@@ -154,7 +173,9 @@ export function Composer({ busy, disabled = false, onSubmit, onStop }: Props) {
           }
           if (open && event.key === 'Escape') {
             event.preventDefault();
+            // 📌 **Esc 关掉整个列表** —— 以前只清高亮，列表还挂在输入框上方
             setActive(-1);
+            setDismissed(true);
             return;
           }
           // ⚠️ **Tab 用来补全** —— 开着列表时不让它跳焦点

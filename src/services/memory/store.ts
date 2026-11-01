@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { config } from '../../config.js';
 import { DIRS } from '../../config/paths.js';
@@ -211,9 +211,52 @@ export async function syncMemoryIndex(): Promise<void> {
       }
     }
     await reindexMemory(entries);
+    indexedMtimes.clear();
+    for (const file of MEMORY_FILES) {
+      indexedMtimes.set(file, memoryFileMtime(file));
+    }
   } catch (err) {
     logger.warn({ err }, '重建记忆索引失败 —— 只影响检索，不影响记忆本身');
   }
+}
+
+/**
+ * 索引时各记忆文件的 mtime（**用来判断「文件被手改过」**）。
+ *
+ * ⚠️ **文件是真相** —— 人手改 `data/memory/USER.md` 之后，
+ * 索引要跟着走（不然搜到的还是旧内容）
+ * （见 [12-d D3](../docs/12-d-需求-记忆与配置.md)）。
+ */
+const indexedMtimes = new Map<string, number>();
+
+/** 记忆文件的 mtime（**读不到就当 0**） */
+function memoryFileMtime(file: string): number {
+  try {
+    return statSync(join(DIRS.memory, `${file}.md`)).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * **索引是不是过期了** —— 有人手改过记忆文件就是过期。
+ */
+export function memoryIndexIsStale(): boolean {
+  for (const file of MEMORY_FILES) {
+    if (indexedMtimes.get(file) !== memoryFileMtime(file)) return true;
+  }
+  return false;
+}
+
+/**
+ * **索引过期就重建** —— 检索之前调一次。
+ *
+ * 📌 **懒重建** —— 不用文件监听（进程重启、watcher 丢事件都麻烦），
+ * 每次检索前比一下 mtime，变了就重建一次。
+ */
+export async function ensureMemoryIndexFresh(): Promise<void> {
+  if (!memoryIndexIsStale()) return;
+  await syncMemoryIndex();
 }
 
 /** 写入的结果 */

@@ -91,9 +91,19 @@ export function pendingToolCalls(state: {
  *
  * ⚠️ **只有「全是子代理派发」且「都不需要确认」才行** ——
  * 挂起时已经跑完的那几个会被执行第二遍（确认点只能有一个）。
+ *
+ * 📌 **注入命中要带进来** —— 命中时档位升到 `high`，
+ * 那就不能并行（并行分支不走确认闸）——
+ * 见 [10 §10.7](../docs/10-安全方案.md)。
  */
-export function canRunInParallel(calls: AssembledToolCall[]): boolean {
+export function canRunInParallel(
+  calls: AssembledToolCall[],
+  injection?: InjectionScan,
+): boolean {
   if (calls.length < 2) return false;
+  // ⚠️ **并行可以关** —— `MULTI_TOOL_CALLS=false` 时一律降级为串行
+  //    （部分供应商不支持并行工具调用，见 [06 §6.2](../docs/06-大模型与模型解析.md)）
+  if (!config.MULTI_TOOL_CALLS) return false;
   if (!calls.every((call) => call.name === 'spawn_subagent')) return false;
 
   const registry = getToolRegistry();
@@ -106,6 +116,8 @@ export function canRunInParallel(calls: AssembledToolCall[]): boolean {
       disabled,
       mcpPolicy: mcpPolicyLookup,
       args: call.args,
+      // 📌 **注入命中 → 升档** —— 不传的话这条分支就是绕过升档的后门
+      injection,
     });
     if (decision.decision !== 'allow') return false;
   }
@@ -149,7 +161,7 @@ export async function toolsNode(
   }
 
   // ── 并行派发子代理（**都不需要确认时**） ──
-  if (canRunInParallel(pending)) {
+  if (canRunInParallel(pending, injectionOf(state.injectionMatches))) {
     const outcomes = await Promise.all(
       pending.map((item) =>
         runToolCall({

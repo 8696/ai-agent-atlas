@@ -1,6 +1,8 @@
 import { nanoid } from 'nanoid';
 import { HumanMessage } from '@langchain/core/messages';
-import { isInterrupted } from '@langchain/langgraph';import { getGraph } from '../../agent/graph.js';
+import { isInterrupted } from '@langchain/langgraph';
+import { getGraph } from '../../agent/graph.js';
+import { getCheckpointSaver } from '../../agent/checkpointer.js';
 import { logger } from '../../logger.js';
 import { writeAudit } from '../../lib/audit.js';
 import { appendAssistantMessage, appendUserMessage } from '../message.js';
@@ -63,6 +65,9 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
         messageId,
         // 📌 **显式放行的工具** —— 无人值守时这些不弹确认
         autoApprove: task.autoApprove,
+        // 📌 **用量记到 `cron` 桶** —— 定时任务花了多少要单独看得见
+        //    （见 [12-b B11](../../docs/12-b-需求-对话与编排.md)）
+        usageScope: 'cron',
       },
       {
         configurable: { thread_id: cronThreadId(task) },
@@ -96,6 +101,15 @@ export async function runCronTask(task: CronTask): Promise<CronRunResult> {
   if (interrupted) {
     const reason = '因需人工确认已跳过';
     logger.warn({ task: task.id, name: task.name }, `定时任务「${task.name}」${reason}`);
+    // ⚠️ **把这一趟的检查点删掉** ——
+    //    否则下一次跑会从同一个挂起点恢复 → 又撞同一个 interrupt → 又跳过，
+    //    每分钟重试一次，**这个任务永远产不出结果**。
+    //    删掉之后下一趟从头跑（无人值守时该确认的工具还是要确认）。
+    try {
+      await getCheckpointSaver().deleteThread(cronThreadId(task));
+    } catch (err) {
+      logger.warn({ err, task: task.id }, '清理定时任务的检查点失败 —— 下次可能还会撞同一个挂起');
+    }
     await writeAudit('CRON_TRIGGERED', 'cron', task.id, {
       name: task.name,
       status: 'skipped',

@@ -5,9 +5,10 @@ import { getWriter } from '@langchain/langgraph';
 import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { scanInjection, tightenSensitivity } from '../../lib/security/injection.js';
+import { disabledTools } from '../../lib/security/policy.js';
 import { estimateTokens } from '../../lib/tokens.js';
 import { writeAudit } from '../../lib/audit.js';
-import { buildSystemPrompt, readAgentsInstructions } from '../../services/prompt.js';
+import { buildSystemPrompt, promptFallbackNotice, readAgentsInstructions } from '../../services/prompt.js';
 import {
   resolveFallback,
   resolveModel,
@@ -22,6 +23,7 @@ import { selectTools } from '../../tools/selection.js';
 import { assembleToolCalls } from '../tool-calls.js';
 import { messageText } from '../../services/chat-messages.js';
 import type { AtlasStateUpdate } from '../state.js';
+import type { UsageScope } from '../../models/cost-log.model.js';
 
 /**
  * `plan` 节点 —— **调模型：直接答，还是调工具？**
@@ -85,6 +87,7 @@ export async function planNode(
     messageId?: string | undefined;
     isolated?: boolean | undefined;
     model?: string | undefined;
+    usageScope?: UsageScope | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): Promise<AtlasStateUpdate> {
@@ -117,7 +120,11 @@ export async function planNode(
 
   // ── 工具池裁剪 ──
   const registry = getToolRegistry();
-  const enabled = registry.list().filter((tool) => tool.enabled);
+  // ⚠️ **被全局开关禁用的工具不进池** —— 模型不该看见一个必然失败的工具
+  //    （`SHELL_ENABLED=false` → 模型**根本看不到** `shell`，
+  //    而不是「看得见但一调就报错」—— 见 [12-b B3](../docs/12-b-需求-对话与编排.md)）
+  const disabled = disabledTools(config);
+  const enabled = registry.list().filter((tool) => tool.enabled && !disabled.has(tool.name));
   // ⚠️ **子代理不能派子代理** —— 防递归（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
   const pool = state.isolated ? enabled.filter((tool) => tool.executor !== 'none') : enabled;
   const query = lastUserText(state.messages);
@@ -182,11 +189,19 @@ export async function planNode(
 
   const emit = getWriter(runnableConfig);
 
+  // 📌 **「用了兜底提示词」要显式说一声** —— 不要静默降级
+  //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）
+  const fallbackNotice = promptFallbackNotice();
+  if (fallbackNotice) emit?.({ type: 'notice', text: fallbackNotice });
+
   let text = '';
   const toolCallChunks: Array<{ index?: number; id?: string; name?: string; args?: string }> = [];
   let usage = 0;
   let inputTokens = 0;
   let outputTokens = 0;
+  // 📌 **推理 token / 缓存 token 单列** —— 成本报表要能拆开看
+  let reasoningTokens = 0;
+  let cachedTokens = 0;
   // 📌 **记账要用「真正跑出这一轮的那个模型」** —— 切过备用就不能记主模型的账
   let usedModel = model;
 
@@ -197,7 +212,13 @@ export async function planNode(
       text?: string;
       contentBlocks?: unknown;
       tool_call_chunks?: Array<{ index?: number; id?: string; name?: string; args?: string }>;
-      usage_metadata?: { total_tokens?: number; input_tokens?: number; output_tokens?: number };
+      usage_metadata?: {
+        total_tokens?: number;
+        input_tokens?: number;
+        output_tokens?: number;
+        output_token_details?: { reasoning?: number };
+        input_token_details?: { cache_read?: number; cache_creation?: number };
+      };
     };
     usedModel = item.model;
 
@@ -228,6 +249,23 @@ export async function planNode(
       if (typeof meta.output_tokens === 'number') {
         outputTokens = Math.max(outputTokens, meta.output_tokens);
       }
+      // 📌 **推理 token 与缓存 token 也要记** ——
+      //    以前只取前三个，推理 token 一条都没落库，
+      //    `/usage` 与 `yarn cost:report` 的「推理」那一行永远是空的
+      //    （见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
+      const outputDetails = meta.output_token_details as { reasoning?: number } | undefined;
+      if (typeof outputDetails?.reasoning === 'number') {
+        reasoningTokens = Math.max(reasoningTokens, outputDetails.reasoning);
+      }
+      const inputDetails = meta.input_token_details as
+        | { cache_read?: number; cache_creation?: number }
+        | undefined;
+      if (typeof inputDetails?.cache_read === 'number') {
+        cachedTokens = Math.max(cachedTokens, inputDetails.cache_read);
+      }
+      if (typeof inputDetails?.cache_creation === 'number') {
+        cachedTokens = Math.max(cachedTokens, inputDetails.cache_creation);
+      }
     }
   }
 
@@ -246,10 +284,14 @@ export async function planNode(
     void recordUsage({
       sessionId: state.sessionId ?? null,
       messageId: state.messageId ?? null,
-      scope: 'chat',
+      // 📌 **按这一轮的用途分桶** —— 定时任务记 `cron`，跟普通对话分开
+      //    （见 [12-b B11](../docs/12-b-需求-对话与编排.md)）
+      scope: state.usageScope || 'chat',
       model: usedModel.name,
       inputTokens,
       outputTokens,
+      reasoningTokens,
+      cachedTokens,
     });
   }
 

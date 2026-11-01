@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { useTempDatabase } from '../fixtures/db';
 
@@ -25,6 +25,8 @@ vi.mock('../../src/logger', () => ({
 
 /** 每次模型调用看到的系统提示词 */
 let systemPrompts: string[] = [];
+/** 每次模型调用看到的**全部**消息（**含历史**） */
+let allMessages: Array<Array<{ content?: unknown }>> = [];
 
 vi.mock('../../src/services/model', async () => {
   const actual = await vi.importActual<typeof import('../../src/services/model')>(
@@ -48,6 +50,7 @@ vi.mock('../../src/services/model', async () => {
         stream: async function* (messages: Array<{ content?: unknown }>) {
           const first = messages[0];
           systemPrompts.push(typeof first?.content === 'string' ? first.content : '');
+          allMessages.push(messages);
           yield { text: '好的' };
         },
         invoke: async () => ({ content: '' }),
@@ -71,6 +74,7 @@ const { initDatabase } = await import('../../src/db');
 const { umzug } = await import('../../scripts/migrate');
 const { createApp } = await import('../../src/app');
 const { upsertMemoryEntry } = await import('../../src/services/memory/store');
+const { config } = await import('../../src/config');
 
 upsertMemoryEntry('USER', {
   name: 'prefers-pnpm',
@@ -102,6 +106,7 @@ afterAll(() => {
 
 beforeEach(() => {
   systemPrompts = [];
+  allMessages = [];
 });
 
 /** 建一个会话 */
@@ -152,5 +157,43 @@ describe('上下文注入（[12-a A4](../docs/12-a-需求-应用外壳与上下�
     await chat(sessionId, '我 prefers 什么');
 
     expect(systemPrompts[0]).toContain(MEMORY_MARKER);
+  });
+
+  it('📌 `prompts/tool.md`（工具使用规范）进了系统提示词', async () => {
+    const sessionId = await createSession();
+    await chat(sessionId, '你好');
+
+    // 📌 **工具规范必须是「每轮读」的** —— 之前这个文件写了没人读
+    const toolText = readFileSync(join(home, 'prompts', 'tool.md'), 'utf8');
+    expect(toolText.trim()).not.toBe('');
+    expect(systemPrompts[0]).toContain(toolText.trim().split('\n')[0]?.trim() ?? '');
+    expect(systemPrompts[0]).not.toContain('{{tool}}');
+  });
+
+  it('📌 `SYSTEM_LANGUAGE` 定了回复语言，也进了系统提示词', async () => {
+    const sessionId = await createSession();
+    await chat(sessionId, '你好');
+
+    expect(systemPrompts[0]).toContain(config.SYSTEM_LANGUAGE);
+    expect(systemPrompts[0]).not.toContain('{{language}}');
+  });
+});
+
+describe('`/reset` 清空上下文（[12-b B9](../docs/12-b-需求-对话与编排.md)）', () => {
+  it('📌 `/reset` 之后，之前的对话不再进模型上下文', async () => {
+    const sessionId = await createSession();
+    await chat(sessionId, '记住标记 RESETMARKER42 这件事');
+
+    // 📌 **先确认历史确实进过上下文** —— 否则这条用例是空的
+    const firstTurn = allMessages.at(-1) ?? [];
+    expect(JSON.stringify(firstTurn)).toContain('RESETMARKER42');
+
+    await chat(sessionId, '/reset');
+
+    await chat(sessionId, '现在聊点别的');
+    const afterReset = allMessages.at(-1) ?? [];
+    // ⚠️ **以前这里会失败** —— `/reset` 把摘要清空了，
+    //    `trimByBoundary` 一看没摘要就直接返回全部历史
+    expect(JSON.stringify(afterReset)).not.toContain('RESETMARKER42');
   });
 });

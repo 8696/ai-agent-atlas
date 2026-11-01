@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { useTempDatabase } from '../fixtures/db';
 
@@ -143,6 +143,30 @@ describe('delete_path', () => {
   it('⚠️ 工作区根目录不能删', async () => {
     const result = await invoke('delete_path', { path: '.' });
     expect(result.ok).toBe(false);
+  });
+
+  it('⚠️ 删软链 → **只删链接本身**，它指向的文件还在', async () => {
+    // 📌 **以前这里是错的** —— 路径解析把软链解开了，
+    //    「删软链」实际删掉了它指向的**真实文件**
+    writeFileSync(join(paths.workspaceRoot, 'real.txt'), '要保住的内容\n');
+    symlinkSync('real.txt', join(paths.workspaceRoot, 'link.txt'));
+
+    const result = await invoke('delete_path', { path: 'link.txt' });
+    expect(result.ok).toBe(true);
+    // 📌 **软链没了，指向的文件还在**
+    expect(existsSync(join(paths.workspaceRoot, 'link.txt'))).toBe(false);
+    expect(readFileSync(join(paths.workspaceRoot, 'real.txt'), 'utf8')).toContain('要保住的内容');
+  });
+
+  it('⚠️ 软链指向工作区外 → 删链接本身，不碰外面的文件', async () => {
+    const outside = join(paths.workspaceRoot, '..', `atlas-outside-${process.pid}.txt`);
+    writeFileSync(outside, '外面的内容\n');
+    symlinkSync(outside, join(paths.workspaceRoot, 'out-link.txt'));
+
+    const result = await invoke('delete_path', { path: 'out-link.txt' });
+    expect(result.ok).toBe(true);
+    expect(existsSync(outside)).toBe(true);
+    rmSync(outside, { force: true });
   });
 });
 

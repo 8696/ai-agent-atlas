@@ -39,7 +39,7 @@ export class ErrorBoundary extends Component<Props, State> {
           type="error"
           showIcon
           title="渲染时抛了异常"
-          description={error.message}
+          description="出了点意外，回到聊天页继续。原始错误在浏览器控制台里。"
           style={{ marginBottom: 16 }}
         />
         <Button type="primary" onClick={() => this.setState({ error: null })}>

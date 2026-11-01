@@ -275,6 +275,31 @@ describe('工具调用循环（[12-b B4](../docs/12-b-需求-对话与编排.md)
     expect(executed.length).toBeLessThanOrEqual(limit);
     expect(chunks.some((chunk) => chunk.type === 'data-notice')).toBe(true);
   });
+
+  it('⚠️ 工具调用步数到上限 → 停下来（`MAX_TOOL_STEPS`）', async () => {
+    const sessionId = await createSession();
+    // 📌 **每次都换一个工具** —— 绕开「同工具连续上限」，
+    //    只让**步数上限**来刹车
+    script = [
+      { tool: { name: 'echo_tool', args: { value: '1' } } },
+      { tool: { name: 'echo_tool', args: { value: '2' } } },
+      { tool: { name: 'echo_tool', args: { value: '3' } } },
+      { tool: { name: 'echo_tool', args: { value: '4' } } },
+      { tool: { name: 'echo_tool', args: { value: '5' } } },
+      { tool: { name: 'echo_tool', args: { value: '6' } } },
+      { tool: { name: 'echo_tool', args: { value: '7' } } },
+      { text: '够了' },
+    ];
+
+    const response = await postChat(sessionId, '一直调 echo_tool');
+    const chunks: Chunk[] = [];
+    for await (const chunk of readChunks(response)) chunks.push(chunk);
+
+    // 📌 **上限就是 `.env` 的 `MAX_TOOL_STEPS`** —— 文档 A5 的验收项引的就是这条
+    expect(executed.length).toBeLessThanOrEqual(config.MAX_TOOL_STEPS);
+    expect(executed.length).toBeGreaterThan(0);
+    expect(chunks.some((chunk) => chunk.type === 'data-notice')).toBe(true);
+  });
 });
 
 describe('工具流水（[12-c C6](../docs/12-c-需求-工具技能与扩展.md)）', () => {

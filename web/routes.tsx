@@ -20,8 +20,8 @@ export const router = createBrowserRouter([
     errorElement: <ErrorPage />,
     children: [
       { index: true, element: <Navigate to="/chat" replace /> },
-      { path: 'chat', element: <ChatPage /> },
-      { path: 'sessions', element: <SessionsPage /> },
+      { path: 'chat', element: <ChatPage />, errorElement: <ErrorPage /> },
+      { path: 'sessions', element: <SessionsPage />, errorElement: <ErrorPage /> },
       { path: '*', element: <ErrorPage status={404} /> },
     ],
   },

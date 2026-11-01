@@ -5,7 +5,7 @@ import { createChatModel, resolveModel } from './model.js';
 import { recordUsage, usageOf } from './cost.js';
 import { probeFts, searchMemory, searchMessages, ensureFtsTables } from '../lib/fts.js';
 import { MEMORY_FILES } from './memory/types.js';
-import { readMemory } from './memory/store.js';
+import { readMemory, ensureMemoryIndexFresh } from './memory/store.js';
 
 /**
  * 跨会话检索 —— **FTS5 全文索引 + LLM 摘要**
@@ -134,6 +134,9 @@ export async function searchAll(
   }
 
   try {
+    // 📌 **索引过期先重建** —— 记忆在文件里，人手改过就要跟着走
+    //    （见 [12-d D3](../docs/12-d-需求-记忆与配置.md)）
+    await ensureMemoryIndexFresh();
     const memoryHits = await searchMemory(trimmed, topK);
     for (const hit of memoryHits) {
       hits.push({

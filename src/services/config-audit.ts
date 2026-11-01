@@ -6,6 +6,7 @@ import { config } from '../config.js';
 import { DIRS, PROJECT_ROOT } from '../config/paths.js';
 import { logger } from '../logger.js';
 import { writeAudit } from '../lib/audit.js';
+import { isConfigSecretField } from '../lib/security/mask.js';
 import { AuditLog } from '../models/audit-log.model.js';
 
 /**
@@ -40,6 +41,22 @@ export function currentCommit(): string {
 }
 
 /**
+ * 配置 hash —— **先把密钥类字段换成 `***` 再算**。
+ *
+ * ⚠️ **不能把 API Key 算进 hash** —— 那等于在库里存了一份
+ * 「这份 key 的 SHA-256 承诺」，低熵 key 是能被字典攻击还原的
+ * （见 [12-a A5](../docs/12-a-需求-应用外壳与上下文.md)）。
+ * 📌 代价：换 key 不改 hash；改别的 key 会改 hash —— 这正是审计要的。
+ */
+export function configHash(config: object): string {
+  const redacted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(config)) {
+    redacted[key] = isConfigSecretField(key) && value ? '***' : value;
+  }
+  return shortHash(JSON.stringify(redacted));
+}
+
+/**
  * 记配置审计（**启动时调一次**）。
  *
  * ⚠️ **失败只记日志** —— 审计挂了不该让服务起不来。
@@ -47,7 +64,7 @@ export function currentCommit(): string {
 export async function auditConfigOnStartup(): Promise<void> {
   try {
     const commit = currentCommit();
-    const hash = shortHash(JSON.stringify(config));
+    const hash = configHash(config);
     await writeAudit('CONFIG_LOADED', 'config', undefined, { hash, commit });
     await auditPromptChanges(commit);
   } catch (err) {

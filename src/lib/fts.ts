@@ -1,5 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../db.js';
+import { logger } from '../logger.js';
 import { expandForTrigram, trigramPhrases } from './text.js';
 
 /**
@@ -325,6 +326,32 @@ export async function searchSkills(
     { replacements: { match, limit }, type: QueryTypes.SELECT },
   );
   return rows.map((row) => ({ name: row.name, score: row.score }));
+}
+
+/**
+ * **回填消息索引** —— 把「触发器建之前就写进去的消息」补进 `messages_fts`。
+ *
+ * ⚠️ **触发器只管增量** —— 老库（触发器建立之前写的消息）**永远搜不到**。
+ *    现场看不出来是因为建表与写消息差不多同时发生的；
+ *    但只要「先写消息、后建索引」（旧库迁移、手工导入）就会留下空洞。
+ *
+ * 📌 **幂等** —— 只补 `messages_fts` 里没有的 rowid。
+ */
+export async function backfillMessageIndex(): Promise<number> {
+  const probe = await probeFts();
+  if (!probe.available) return 0;
+  try {
+    const result = await sequelize.query(
+      `INSERT INTO messages_fts(rowid, content, session_id)
+       SELECT m.rowid, m.content, m.session_id FROM messages m
+       WHERE m.rowid NOT IN (SELECT rowid FROM messages_fts)`,
+    );
+    // 📌 **返回补了几条** —— 启动日志里报一下，别静默
+    return Number((result as unknown as { count?: number }).count ?? 0);
+  } catch (err) {
+    logger.warn({ err }, '回填消息索引失败 —— 跨会话检索可能漏掉老消息');
+    return 0;
+  }
 }
 
 /** 重建技能索引（**技能在文件里，改了文件就要重建**） */

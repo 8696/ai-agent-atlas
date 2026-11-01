@@ -321,9 +321,20 @@ export async function runCommand(
         const lastUser = await lastTurnUserMessage(sessionId);
         if (!lastUser) return { text: '没有可撤销的轮次。', action: 'none' };
 
+        // 📌 **命令自己那条用户消息要留下** ——
+        //    它是「撤销」这个动作的记录，删了界面上就只剩一条孤零零的回执
+        const newest = await Message.findOne({
+          where: { session_id: sessionId, role: 'user' },
+          order: [['created_at', 'DESC']],
+        });
+
         // ⚠️ **删掉最后一条用户消息及其之后的全部消息** —— 那一轮整个回退
         await Message.destroy({
-          where: { session_id: sessionId, created_at: { [Op.gte]: lastUser.created_at } },
+          where: {
+            session_id: sessionId,
+            created_at: { [Op.gte]: lastUser.created_at },
+            ...(newest?.id ? { id: { [Op.ne]: newest.id } } : {}),
+          },
         });
         // ⚠️ **图状态也要回退** —— 否则下一轮会从旧检查点继续
         await clearThreadState(sessionId);

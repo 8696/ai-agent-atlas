@@ -61,11 +61,24 @@ export async function* createChatEventStream(
   let reasoningOpen = false;
   let reasoningCount = 0;
   let reasoningId = REASONING_PART_ID;
+  // 📌 **正文按「工具调用」分段** —— 调工具之前说的话与调完之后说的话
+  //    是**两段**，中间夹着工具卡片。
+  //    以前全程只有一段（id 固定 `0`），于是卡片被顶到了答案下面
+  //    （文档说卡片在「回答上方」，见 [12-b B7](../docs/12-b-需求-对话与编排.md)）
+  let textPartId = TEXT_PART_ID;
+  let textCount = 0;
 
   const closeReasoning = function* (): Generator<UIMessageChunk> {
     if (!reasoningOpen) return;
     yield { type: 'reasoning-end', id: reasoningId };
     reasoningOpen = false;
+  };
+
+  /** 关掉当前正文段（**工具卡片插进来之前要关**） */
+  const closeText = function* (): Generator<UIMessageChunk> {
+    if (!textStarted) return;
+    yield { type: 'text-end', id: textPartId };
+    textStarted = false;
   };
 
   try {
@@ -84,11 +97,16 @@ export async function* createChatEventStream(
 
       if (event.type === 'tool-call') {
         yield* closeReasoning();
+        // 📌 **正文在这里断开** —— 卡片要夹在「调工具前说的话」与「之后说的话」中间
+        yield* closeText();
         yield {
           type: 'data-tool-call',
           id: `tool:${event.card.toolCallId}`,
           data: event.card,
         };
+        // 📌 **下一段正文换个 id** —— 否则两段会被并成一段（卡片又被顶到下面）
+        textCount += 1;
+        textPartId = textCount === 1 ? `${TEXT_PART_ID}-1` : `${TEXT_PART_ID}-${textCount}`;
         continue;
       }
 
@@ -125,14 +143,14 @@ export async function* createChatEventStream(
 
       yield* closeReasoning();
       if (!textStarted) {
-        yield { type: 'text-start', id: TEXT_PART_ID };
+        yield { type: 'text-start', id: textPartId };
         textStarted = true;
       }
-      yield { type: 'text-delta', id: TEXT_PART_ID, delta: event.delta };
+      yield { type: 'text-delta', id: textPartId, delta: event.delta };
     }
   } finally {
     yield* closeReasoning();
-    if (textStarted) yield { type: 'text-end', id: TEXT_PART_ID };
+    if (textStarted) yield { type: 'text-end', id: textPartId };
     yield { type: 'finish-step' };
     yield { type: 'finish' };
   }

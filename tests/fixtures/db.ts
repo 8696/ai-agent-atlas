@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -25,5 +25,21 @@ import { join } from 'node:path';
 export function useTempDatabase(): string {
   const dir = mkdtempSync(join(tmpdir(), 'atlas-test-'));
   process.env.ATLAS_HOME = dir;
+
+  // 📌 **出厂提示词要摆好** —— 临时项目根是空的，
+  //    启动时会从兜底模板写回 `prompts/*.md`，
+  //    那会触发「用了兜底提示词」的提示（**降级路径**），
+  //    于是每个用例的 SSE 里都多一条 `data-notice`。
+  //    正常安装有完整的出厂文件 —— 测试环境要跟正常安装一样。
+  const repoRoot = join(import.meta.dirname, '../..');
+  mkdirSync(join(dir, 'prompts'), { recursive: true });
+  try {
+    for (const name of readdirSync(join(repoRoot, 'prompts'))) {
+      if (name.endsWith('.md')) copyFileSync(join(repoRoot, 'prompts', name), join(dir, 'prompts', name));
+    }
+    copyFileSync(join(repoRoot, 'SOUL.md'), join(dir, 'SOUL.md'));
+  } catch {
+    // 搬不动就算了 —— 顶多让测试里多一条提示，不至于跑不起来
+  }
   return dir;
 }

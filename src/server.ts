@@ -5,7 +5,7 @@ import { createApp } from './app.js';
 import { describeBoundary } from './lib/boundary.js';
 import { getToolRegistry } from './tools/registry.js';
 import { initMcp } from './tools/mcp/manager.js';
-import { ensureFtsTables } from './lib/fts.js';
+import { backfillMessageIndex, ensureFtsTables } from './lib/fts.js';
 import { syncMemoryIndex } from './services/memory/store.js';
 import { reloadSkills, syncSkillIndex } from './skills/store.js';
 import { auditConfigOnStartup, auditSkillInstalls } from './services/config-audit.js';
@@ -85,6 +85,12 @@ async function main() {
     const probe = await ensureFtsTables();
     if (probe.available) {
       logger.info({ trigram: probe.trigram }, 'FTS 全文索引已就绪');
+      // 📌 **回填老消息** —— 触发器只管增量，
+      //    「先写消息、后建索引」的那批消息否则永远搜不到
+      const backfilled = await backfillMessageIndex();
+      if (backfilled > 0) {
+        logger.info({ backfilled }, '消息索引已回填（老消息现在能被检索到）');
+      }
       await syncMemoryIndex();
       // 📌 **技能索引一起重建** —— 技能在文件里，改了文件就要重建
       await syncSkillIndex();
@@ -100,9 +106,12 @@ async function main() {
   await auditConfigOnStartup();
 
   const app = createApp();
+  // ⚠️ **告警先打，再开端口** —— 原来是在 listen 回调里打的，
+  //    那是「端口已经在收连接」之后 —— 非回环绑定的那一瞬间
+  //    「局域网里谁能用这个 Agent 执行命令」的风险已经存在了
+  printBoundaryNotice();
   const server = app.listen(config.PORT, config.HOST, () => {
     logger.info({ host: config.HOST, port: config.PORT }, 'atlas backend listening');
-    printBoundaryNotice();
   });
 
   // 📌 **定时任务调度器** —— 每分钟检查一次到期任务

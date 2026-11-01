@@ -120,6 +120,10 @@ export function addCronTask(
     sessionId: string;
     enabled?: boolean | undefined;
     autoApprove?: string[] | undefined;
+    /**
+     * 上一轮的错误（**新建时就带上** —— 解析失败的任务要留着原文与原因）。
+     */
+    lastError?: string | undefined;
   },
   path: string = FILES.cron,
 ): CronTask {
@@ -137,7 +141,7 @@ export function addCronTask(
     createdAt: now,
     lastRunAt: now,
     lastStatus: '',
-    lastError: '',
+    lastError: input.lastError ?? '',
   };
   tasks.push(task);
   saveCronTasks(tasks, path);

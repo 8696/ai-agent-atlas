@@ -82,7 +82,13 @@ export function selectTools(
 
   // ⚠️ **基础工具也超上限时按相关度取前 N** —— 不硬编码阈值，只做相对排序
   if (basic.length >= limit) {
-    return basic.slice(0, limit).map((item) => item.tool);
+    // 📌 **但高危工具至少留一个** ——
+    //    全砍掉的话，模型连「写文件」「跑命令」都看不见，
+    //    验收项「工具池超过上限时，模型仍能选到最相关的那个」就不成立
+    //    （见 [12-c C1](../docs/12-c-需求-工具技能与扩展.md)）
+    const kept = basic.slice(0, limit - 1);
+    const topRisky = risky[0];
+    return [...kept, ...(topRisky ? [topRisky] : [])].map((item) => item.tool);
   }
 
   const picked = [...basic, ...risky.slice(0, limit - basic.length)];

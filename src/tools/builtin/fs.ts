@@ -3,7 +3,7 @@ import type { Dirent } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { z } from 'zod';
 import { paths } from '../../config.js';
-import { SandboxError, assertNotWorkspaceRoot, resolveContextFile, resolveInWorkspace, toWorkspaceRelative } from '../../lib/security/sandbox.js';
+import { SandboxError, assertNotWorkspaceRoot, resolveContextFile, resolveInWorkspace, resolveInWorkspaceKeepLink, toWorkspaceRelative } from '../../lib/security/sandbox.js';
 import { parseArgs, schemas } from '../args.js';
 import { truncateOutput } from '../output.js';
 import { hasWildcard, matchesGlob } from '../glob.js';
@@ -227,7 +227,9 @@ export const deletePathTool: ToolDefinition = {
   invoke(args): Promise<ToolResult> {
     try {
       const input = parseArgs(deletePathSchema, args);
-      const target = resolveInWorkspace(input.path, paths.workspaceRoot);
+      // ⚠️ **最后一段的软链不要解开** —— 解开了「删软链」就变成「删它指向的东西」
+      //    （见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）
+      const target = resolveInWorkspaceKeepLink(input.path, paths.workspaceRoot);
       assertNotWorkspaceRoot(target, paths.workspaceRoot);
       const stat = lstatSync(target, { throwIfNoEntry: false });
       if (!stat) {
