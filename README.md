@@ -58,6 +58,8 @@
 三个环境变量切换供应商：`LLM_BASE_URL`、`LLM_API_KEY`、`LLM_MODEL`。Anthropic 兼容和 OpenAI 兼容端点都可以。主模型失败且还没开始输出时，自动切到备用模型。
 
 记忆抽取、会话摘要、检索摘要、技能沉淀判断、cron 解析可以走辅助模型（`LLM_AUX_*`）。没配就用主模型。系统提示词可以打开 Anthropic 提示词缓存（`LLM_PROMPT_CACHE`），端点不支持时自动退回。
+> ⚠️ **不是所有兼容端点都实现了缓存** —— 有一档是「接受 `cache_control`、不报错、但缓存根本没生效」。
+> 跑 `yarn cache:probe` 当场测一下：它发两次一模一样的长前缀请求，看第二次有没有命中。
 
 每轮把 token 和费用记进 `cost_logs`。月度预算到达告警线会提示，也可以设成超预算直接拦住。`/usage`、用量统计页和 `yarn cost:report` 都能看用量。`MAX_TOKENS_PER_TURN` 可以给单轮设上限（默认不限）。
 
@@ -104,7 +106,7 @@ npx playwright install chromium
 | 模型 | `.env` 的 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` |
 | 备用模型 | `.env` 的 `LLM_FALLBACK_*`（留空表示没有兜底） |
 | 辅助模型 | `.env` 的 `LLM_AUX_*`（留空则脏活也走主模型） |
-| 项目指令 | `AGENTS.md`（每轮注入前 6000 字，超长会截断；模型可以 `read_file` 读全文） |
+| 项目指令 | `AGENTS.md`（每轮注入前 `AGENTS_MAX_CHARS` 字；超长会截断，**并附上章节目录（带行号）**，模型能据此 `read_file` 精确读某一节） |
 | 人格 | `SOUL.md`（也认 `SOUL*.md`） |
 | 系统提示词 | `prompts/*.md` |
 | 长期记忆 | `data/memory/MEMORY.md`、`data/memory/USER.md` |
@@ -167,10 +169,12 @@ npx playwright install chromium
 | `yarn search <关键词>` | 跨会话检索 |
 | `yarn cron:list` | 查看定时任务（还有 `add` / `remove`） |
 | `yarn cost:report` | 用量报表 |
+| `yarn cache:probe` | 测这个端点**到底支不支持提示词缓存**（有的兼容端点不报错但也不生效） |
 | `yarn tool:logs` | 工具调用流水 |
 | `yarn audit:logs` | 审计日志 |
 | `yarn backup` | 备份数据库和记忆文件 |
 | `yarn env:check` | 核对 `.env` 与 `.env.example` |
+| `yarn data:clean --yes` | 清掉测试残留（默认干跑）；加 `--vacuum` 顺带把空闲页还给磁盘 |
 
 ## 工具
 

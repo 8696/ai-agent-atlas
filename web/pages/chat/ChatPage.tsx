@@ -182,18 +182,30 @@ export function ChatPage() {
    * ⚠️ 用 `regenerate({ messageId })` 而不是 `sendMessage` ——
    * 后者会把同一条问题再塞一遍，聊天区出现两个一样的气泡。
    */
-  const regenerateAnswer = (messageId: string) => {
-    clearError();
-    if (!sessionId) {
-      void loadModels();
-      return;
-    }
-    void regenerate({ messageId, body: { sessionId } });
-  };
+  // 📌 **`useCallback` —— 引用要稳定** ——
+  //    `MessageList` 的每一行都是 `memo` 的，
+  //    回调引用一变就等于「全部行重渲染」，
+  //    流式输出时那几百行 Markdown 会被重新解析一遍。
+  const regenerateAnswer = useCallback(
+    (messageId: string) => {
+      clearError();
+      if (!sessionId) {
+        void loadModels();
+        return;
+      }
+      void regenerate({ messageId, body: { sessionId } });
+    },
+    [clearError, loadModels, regenerate, sessionId],
+  );
 
   /** 人工确认（**批准 / 取消**） */
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState('');
+  // 📌 **「正在处理」的标记放 ref 里** ——
+  //    放 state 的话 `handleConfirm` 的引用会跟着变，
+  //    `MessageList` 的每一行都是 `memo` 的 →
+  //    一次确认就把整个会话重渲染一遍。
+  const confirmingRef = useRef(false);
   const handleConfirm = useCallback(
     async (
       approved: boolean,
@@ -201,7 +213,8 @@ export function ChatPage() {
       fingerprint: string,
       approveAll?: boolean,
     ) => {
-      if (!sessionId || confirming) return;
+      if (!sessionId || confirmingRef.current) return;
+      confirmingRef.current = true;
       setConfirming(true);
       setConfirmError('');
       try {
@@ -226,10 +239,11 @@ export function ChatPage() {
       } catch (err) {
         setConfirmError(err instanceof Error ? err.message : '确认失败，请重试');
       } finally {
+        confirmingRef.current = false;
         setConfirming(false);
       }
     },
-    [confirming, sessionId, setMessages],
+    [sessionId, setMessages],
   );
 
   const busy = status === 'submitted' || status === 'streaming';

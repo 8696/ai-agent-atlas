@@ -12,6 +12,7 @@ import {
   streamChatTurn,
   getPendingTurnMessageId,
   unregisterSessionStream,
+  isSessionBusy,
   type ChatEvent,
 } from '../services/chat.js';
 import { resolveModel, resolveFallback } from '../services/model.js';
@@ -273,6 +274,14 @@ function respondWithStream(
         }
       }
     } finally {
+      // 📌 **先把会话的「占用」还回去** ——
+      //    这一轮的活已经干完了（图跑完了、事件也发完了），
+      //    剩下的只是落库。
+      // ⚠️ **必须排在 `stream.end()` 前面** ——
+      //    客户端读完流就会立刻发下一条，
+      //    要是等到落库完才释放，用户的下一条会被并发闸挡住（409）。
+      options.onFinally?.();
+
       if (!abort.signal.aborted) {
         stream.write('data: [DONE]\n\n');
       }
@@ -313,7 +322,7 @@ function respondWithStream(
       // 📌 **记忆抽取在流结束之后**（**不阻塞这一轮**）
       //    ⚠️ **客户端断开就不抽了** —— 那一轮没说完，抽出来的多半是半句话
       if (!abort.signal.aborted) options.after?.(parts.text());
-      options.onFinally?.();
+      // 📌 **`onFinally` 已经在上面调过了** —— 释放要赶在落库前面
       unregisterRequestSignal(options.messageId);
 
       // 📌 **这一轮收尾** —— 状态落库（回答节点也会写一条 `turn.finished` 事件）
@@ -383,152 +392,180 @@ chatRouter.post('/chat', async (ctx) => {
   const model = resolveModel();
 
   const sessionId = parsed.data.sessionId;
+
+  // ⚠️ **并发闸** —— 同一会话同时跑两轮会互相踩：
+  //    `prepare` 节点的「清空再写」会把对方刚装配好的上下文一起清掉，
+  //    检查点也会互相覆盖（同一个 `thread_id`）。
+  //    前端只挡了「同一个标签页连点」，**两个标签页挡不住**。
+  const controller = new AbortController();
   if (sessionId) {
-    // ⚠️ **会话不存在就直接报错** —— 不静默新建一个，
-    //    否则用户删了会话再发消息会「复活」一条空会话
-    const session = await findSession(sessionId);
-    if (!session) {
-      throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+    if (isSessionBusy(sessionId)) {
+      throw new AppError(
+        'SESSION_BUSY',
+        '这个会话还有一轮在跑（可能是另一个标签页）—— 等它跑完，或发 /stop 停掉。',
+        409,
+      );
     }
-    // ⚠️ **先对账再开流** —— 库里与前端历史对齐（重新生成 = 删掉多余的行）
-    await syncMessages(sessionId, parsed.data.messages);
-    // ⚠️ **标题在这里定，不在流结束时定** ——
-    //    这样即使这一轮流失败了，会话也已经有能看懂的标题
-    await applyTitleFromFirstUserMessage(sessionId);
+    // 📌 **先占位再往下走** —— 后面还有一堆 await，
+    //    不先占住的话两个请求会同时通过检查
+    registerSessionStream(sessionId, controller);
   }
 
-  const userText = lastUserText(parsed.data.messages);
-  const command = parseCommand(userText);
-
-  // ⚠️ **assistant 消息 id 先定下来** —— 图状态、工具流水、落库、
-  //    「重启后恢复」用的都是**这一个 id**（三处各生成一个会写成三条消息）
-  const assistantMessageId = nanoid();
-
-  // 📌 **会话全链路日志：开一轮 + 记「收到请求」**
-  //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
-  //    ⚠️ **没有会话就没有日志** —— 日志挂在会话上（跟消息、工具流水一样）
-  if (sessionId) {
-    await startTurn({
-      turnId: assistantMessageId,
-      sessionId,
-      ...(model ? { model: model.name } : {}),
-    });
-    logEvent({
-      turnId: assistantMessageId,
-      sessionId,
-      type: 'request.received',
-      eventKey: 'request.received',
-      title: '收到请求',
-      payload: {
-        trigger: parsed.data.trigger ?? null,
-        userText,
-        messages: parsed.data.messages,
-      },
-    });
-  }
-
-  // ── 斜杠命令：**服务端解析，零 LLM 调用** ──
-  // ⚠️ **命令不要求配模型** —— `/help` 用不着模型，
-  //    「没配模型就什么都干不了」对命令不成立
-  if (command) {
-    const result = await runCommand(command, { sessionId });
-
+  try {
     if (sessionId) {
-      logEvent({
+      // ⚠️ **会话不存在就直接报错** —— 不静默新建一个，
+      //    否则用户删了会话再发消息会「复活」一条空会话
+      const session = await findSession(sessionId);
+      if (!session) {
+        throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+      }
+      // ⚠️ **先对账再开流** —— 库里与前端历史对齐（重新生成 = 删掉多余的行）
+      await syncMessages(sessionId, parsed.data.messages);
+      // ⚠️ **标题在这里定，不在流结束时定** ——
+      //    这样即使这一轮流失败了，会话也已经有能看懂的标题
+      await applyTitleFromFirstUserMessage(sessionId);
+    }
+
+    const userText = lastUserText(parsed.data.messages);
+    const command = parseCommand(userText);
+
+    // ⚠️ **assistant 消息 id 先定下来** —— 图状态、工具流水、落库、
+    //    「重启后恢复」用的都是**这一个 id**（三处各生成一个会写成三条消息）
+    const assistantMessageId = nanoid();
+
+    // 📌 **会话全链路日志：开一轮 + 记「收到请求」**
+    //    （见 [12-e E7](../docs/12-e-需求-观测安全与验收.md)）
+    //    ⚠️ **没有会话就没有日志** —— 日志挂在会话上（跟消息、工具流水一样）
+    if (sessionId) {
+      await startTurn({
         turnId: assistantMessageId,
         sessionId,
-        type: 'command.executed',
-        eventKey: 'command.executed',
-        title: `斜杠命令 /${command.name}`,
-        payload: { command: command.name, args: command.args, result: result.text },
+        ...(model ? { model: model.name } : {}),
       });
       logEvent({
         turnId: assistantMessageId,
         sessionId,
-        type: 'turn.finished',
-        eventKey: 'turn.finished',
-        title: '收尾',
-        payload: { text: result.text, kind: 'command' },
+        type: 'request.received',
+        eventKey: 'request.received',
+        title: '收到请求',
+        payload: {
+          trigger: parsed.data.trigger ?? null,
+          userText,
+          messages: parsed.data.messages,
+        },
       });
     }
+
+    // ── 斜杠命令：**服务端解析，零 LLM 调用** ──
+    // ⚠️ **命令不要求配模型** —— `/help` 用不着模型，
+    //    「没配模型就什么都干不了」对命令不成立
+    if (command) {
+      const result = await runCommand(command, { sessionId });
+
+      if (sessionId) {
+        logEvent({
+          turnId: assistantMessageId,
+          sessionId,
+          type: 'command.executed',
+          eventKey: 'command.executed',
+          title: `斜杠命令 /${command.name}`,
+          payload: { command: command.name, args: command.args, result: result.text },
+        });
+        logEvent({
+          turnId: assistantMessageId,
+          sessionId,
+          type: 'turn.finished',
+          eventKey: 'turn.finished',
+          title: '收尾',
+          payload: { text: result.text, kind: 'command' },
+        });
+      }
+
+      respondWithStream(ctx, {
+        makeEvents: () =>
+          // eslint-disable-next-line @typescript-eslint/require-await -- async generator 的签名要求
+          (async function* (): AsyncGenerator<ChatEvent> {
+            yield { type: 'text-delta', delta: result.text };
+            yield {
+              type: 'command',
+              payload: {
+                command: command.name,
+                ...(result.action && result.action !== 'none' ? { action: result.action } : {}),
+                ...(result.data ? { data: result.data } : {}),
+              },
+            };
+          })(),
+        messageId: assistantMessageId,
+        ...(sessionId ? { sessionId } : {}),
+        modelName: model?.name ?? 'unknown',
+        // 📌 **命令也是一轮** —— 流结束要把会话的「占用」还回去，
+        //    不然这个会话永远发不了下一条
+        ...(sessionId ? { onFinally: () => unregisterSessionStream(sessionId) } : {}),
+      });
+      return;
+    }
+
+    // ⚠️ **没配模型 → 503**（不是 500）：这是**运行时状态**，用户要做的是改 `.env` 的
+    // `LLM_MODEL`（见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）
+    if (!model) {
+      throw new AppError(
+        'MODEL_NOT_CONFIGURED',
+        '还没配置模型，去改 .env 的 LLM_MODEL（改完重启后端）',
+        503,
+      );
+    }
+
+    // ── 预算闸（**超预算且开了硬拦 → 不执行**） ──
+    const budget = await checkBudget();
+    if (budget.blocked) {
+      throw new AppError(
+        'BUDGET_EXCEEDED',
+        `本轮因超出预算未执行 —— 本月已用 ${budget.used} token，预算 ${budget.budget}。` +
+          '（改 .env 的 MONTHLY_TOKEN_BUDGET，或把 COST_BUDGET_BLOCK 改成 false）',
+        402,
+      );
+    }
+    if (budget.warn) {
+      logger.warn({ used: budget.used, budget: budget.budget }, '本月 token 用量超过告警线');
+    }
+
+    // ⚠️ **assistant 消息 id 先定下来** —— 见上面（**同一个 id**）
+    // 📌 **控制器在上面就建好了** —— 登记流是为了当并发闸，
+    //    `/stop` 也靠它中止正在跑的那一轮
 
     respondWithStream(ctx, {
-      makeEvents: () =>
-        // eslint-disable-next-line @typescript-eslint/require-await -- async generator 的签名要求
-        (async function* (): AsyncGenerator<ChatEvent> {
-          yield { type: 'text-delta', delta: result.text };
-          yield {
-            type: 'command',
-            payload: {
-              command: command.name,
-              ...(result.action && result.action !== 'none' ? { action: result.action } : {}),
-              ...(result.data ? { data: result.data } : {}),
-            },
-          };
-        })(),
+      controller,
+      makeEvents: (signal) =>
+        streamChatTurn({
+          messages: parsed.data.messages,
+          ...(sessionId ? { sessionId } : {}),
+          messageId: assistantMessageId,
+          signal,
+        }),
       messageId: assistantMessageId,
       ...(sessionId ? { sessionId } : {}),
-      modelName: model?.name ?? 'unknown',
+      modelName: model.name,
+      after: (text) => {
+        // 📌 **记忆抽取：fire-and-forget**（不阻塞这一轮）
+        //    📌 **带上会话 id** —— 这一轮若已用 `memory` 工具手动改过记忆，
+        //    自动抽取会跳过（否则同一条记忆被写两遍）
+        void runMemoryExtraction({
+          userText,
+          assistantText: text,
+          ...(sessionId ? { sessionId } : {}),
+          ...(sessionId ? { turnId: assistantMessageId } : {}),
+        }).catch((err) => {
+          logger.warn({ err }, '记忆抽取失败');
+        });
+      },
+      ...(sessionId ? { onFinally: () => unregisterSessionStream(sessionId) } : {}),
     });
-    return;
+  } catch (err) {
+    // ⚠️ **出错要把会话的「占用」还回去** ——
+    //    否则这一轮失败之后，这个会话永远发不了消息了
+    if (sessionId) unregisterSessionStream(sessionId);
+    throw err;
   }
-
-  // ⚠️ **没配模型 → 503**（不是 500）：这是**运行时状态**，用户要做的是改 `.env` 的
-  // `LLM_MODEL`（见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）
-  if (!model) {
-    throw new AppError(
-      'MODEL_NOT_CONFIGURED',
-      '还没配置模型，去改 .env 的 LLM_MODEL（改完重启后端）',
-      503,
-    );
-  }
-
-  // ── 预算闸（**超预算且开了硬拦 → 不执行**） ──
-  const budget = await checkBudget();
-  if (budget.blocked) {
-    throw new AppError(
-      'BUDGET_EXCEEDED',
-      `本轮因超出预算未执行 —— 本月已用 ${budget.used} token，预算 ${budget.budget}。` +
-        '（改 .env 的 MONTHLY_TOKEN_BUDGET，或把 COST_BUDGET_BLOCK 改成 false）',
-      402,
-    );
-  }
-  if (budget.warn) {
-    logger.warn({ used: budget.used, budget: budget.budget }, '本月 token 用量超过告警线');
-  }
-
-  // ⚠️ **assistant 消息 id 先定下来** —— 见上面（**同一个 id**）
-  // 📌 **登记流** —— `/stop` 要靠它中止正在跑的那一轮
-  const controller = new AbortController();
-  if (sessionId) registerSessionStream(sessionId, controller);
-
-  respondWithStream(ctx, {
-    controller,
-    makeEvents: (signal) =>
-      streamChatTurn({
-        messages: parsed.data.messages,
-        ...(sessionId ? { sessionId } : {}),
-        messageId: assistantMessageId,
-        signal,
-      }),
-    messageId: assistantMessageId,
-    ...(sessionId ? { sessionId } : {}),
-    modelName: model.name,
-    after: (text) => {
-      // 📌 **记忆抽取：fire-and-forget**（不阻塞这一轮）
-      //    📌 **带上会话 id** —— 这一轮若已用 `memory` 工具手动改过记忆，
-      //    自动抽取会跳过（否则同一条记忆被写两遍）
-      void runMemoryExtraction({
-        userText,
-        assistantText: text,
-        ...(sessionId ? { sessionId } : {}),
-        ...(sessionId ? { turnId: assistantMessageId } : {}),
-      }).catch((err) => {
-        logger.warn({ err }, '记忆抽取失败');
-      });
-    },
-    ...(sessionId ? { onFinally: () => unregisterSessionStream(sessionId) } : {}),
-  });
 });
 
 /**
@@ -565,12 +602,25 @@ chatRouter.post('/chat/confirm', async (ctx) => {
   }
 
   // ── 路 2：后端重启过 —— 自己恢复图 ──
+  // ⚠️ **也要占住这个会话** —— 恢复走的是同一个 `thread_id`，
+  //    跟同一时间跑起来的新一轮会互相踩（检查点覆盖 + 上下文互清）。
+  //    📌 **原来那一轮已经没人等了**（路 1 没接上），所以这里不会误判
+  if (isSessionBusy(sessionId)) {
+    throw new AppError(
+      'SESSION_BUSY',
+      '这个会话还有一轮在跑 —— 等它跑完，或发 /stop 停掉。',
+      409,
+    );
+  }
+  const controller = new AbortController();
+  registerSessionStream(sessionId, controller);
   const parts = createPartsAccumulator();
   try {
     const events = streamChatTurn({
       sessionId,
       messageId: nanoid(),
       resume: decision,
+      signal: controller.signal,
     });
     for await (const chunk of createChatEventStream({ events })) {
       parts.add(chunk);
@@ -578,6 +628,9 @@ chatRouter.post('/chat/confirm', async (ctx) => {
   } catch (err) {
     logger.error({ err, sessionId }, '恢复被挂起的对话失败');
     throw new AppError('RESUME_FAILED', describeError(err), 500);
+  } finally {
+    // 📌 **恢复完就把占用还回去** —— 否则这个会话再也发不了消息
+    unregisterSessionStream(sessionId);
   }
 
   // ⚠️ **续跑的是同一条消息** —— 消息 id 存在检查点里，重启后还是同一个

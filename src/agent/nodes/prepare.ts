@@ -123,6 +123,15 @@ export async function prepareNode(state: {
 
   return {
     messages: [new RemoveMessage({ id: REMOVE_ALL_MESSAGES }), ...messages],
+    // 📌 **用完就清掉本轮输入** ——
+    //    `turnMessages` 是「网关传进来的前端历史」，
+    //    它的唯一用途就是给 `prepare` 当输入（见 `agent/state.ts`）。
+    //    ⚠️ **不清掉的话它会被存进每一个检查点** ——
+    //    检查点本来就含全量消息，再叠一份完整历史，
+    //    存储直接翻倍（改之前 36 条消息的库里有 3.46 MB 检查点）。
+    //    📌 **清空是安全的** —— 下一轮的 `turnMessages` 由网关重新传进来，
+    //    恢复时也不需要它（`prepare` 已经跑过了）。
+    turnMessages: [],
     executedToolCalls: [],
     lastToolName: null,
     lastToolCount: 0,

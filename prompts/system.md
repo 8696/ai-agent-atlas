@@ -19,14 +19,14 @@
 
 {{language}}
 
+{{tool}}
+
+{{agents}}
+
 ## 当前上下文
 
 - 日期：{{date}}
 - 可用工具：{{tools}}
-
-{{tool}}
-
-{{agents}}
 
 {{skills}}
 

@@ -484,6 +484,16 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       : truncateOutput(result.output);
   const ok = result.ok;
 
+  // 📌 **「给模型看的」与「给用户看的」可以不是同一份** ——
+  //    工具卡片上给人看全文，送模型的可以是它的截断版
+  //    （上下文是按 token 算钱的，见 `tools/types.ts` 的 `modelOutput`）
+  // ⚠️ **`TOOL_MODEL_OUTPUT_MAX_CHARS=0` 表示不限** —— 默认值下行为与改动前一致
+  const modelText = result.modelOutput ?? result.output;
+  const modelClipped =
+    config.TOOL_MODEL_OUTPUT_MAX_CHARS > 0
+      ? truncateOutput(modelText, config.TOOL_MODEL_OUTPUT_MAX_CHARS)
+      : { text: modelText, truncated: false, originalLength: modelText.length };
+
   // ⚠️ **工具结果过注入检测** —— 命中只告警 + 收紧，不直接拒答
   //    （见 [10 §10.7](../docs/10-安全方案.md)）
   const scan = scanInjection(result.output);
@@ -542,7 +552,7 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
     // ⚠️ **出参也要打码** —— 工具读到的密钥不能进图状态
     //    （检查点 `graph_checkpoints` / 消息表 / parts 都从这一份出去，
     //    工具结果一旦带密钥就会**一路明文落库**）
-    content: markUntrusted(maskString(clipped.text), tool.name),
+    content: markUntrusted(maskString(modelClipped.text), tool.name),
     ...(batchApproved ? { approveAll: true } : {}),
     card: {
       ...card,

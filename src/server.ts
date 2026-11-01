@@ -6,6 +6,7 @@ import { describeBoundary } from './lib/boundary.js';
 import { getToolRegistry } from './tools/registry.js';
 import { initMcp } from './tools/mcp/manager.js';
 import { backfillMessageIndex, ensureFtsTables } from './lib/fts.js';
+import { collectOrphanThreads, pruneAllThreads } from './agent/checkpointer.js';
 import { syncMemoryIndex } from './services/memory/store.js';
 import { reloadSkills, syncSkillIndex } from './skills/store.js';
 import { auditConfigOnStartup, auditSkillInstalls } from './services/config-audit.js';
@@ -77,6 +78,25 @@ async function main() {
     if (purged > 0) logger.info({ purged }, 'purged expired sessions');
   } catch (err) {
     logger.error({ err }, 'failed to purge expired sessions');
+  }
+
+  // 📌 **裁剪旧的图检查点** —— 检查点每个节点落一个、每个含全量状态，
+  //    不裁剪就是平方级涨（改之前实测：36 条消息攒了 3.46 MB 检查点）。
+  //    恢复只需要「最新的那个 + 它的 pending writes」，留 8 个绰绰有余。
+  try {
+    const threads = await pruneAllThreads();
+    if (threads > 0) logger.info({ threads }, '图检查点已裁剪（每个会话只留最近 8 个）');
+  } catch (err) {
+    logger.error({ err }, 'failed to prune graph checkpoints');
+  }
+
+  // 📌 **回收孤儿 thread 的检查点** —— 会话早没了、检查点还在
+  //    （实测：本机库 452 个会话 thread 里有 440 个是孤儿）
+  try {
+    const orphans = await collectOrphanThreads();
+    if (orphans > 0) logger.info({ orphans }, '孤儿会话的图检查点已回收');
+  } catch (err) {
+    logger.error({ err }, 'failed to collect orphan graph checkpoints');
   }
 
   // 📌 **全文索引就绪** —— 跨会话检索靠它（见 [12-d D3](./docs/12-d-需求-记忆与配置.md)）

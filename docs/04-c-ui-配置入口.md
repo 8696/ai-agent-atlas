@@ -133,7 +133,7 @@ LLM_MODEL=glm-5.3
 | 记忆 | `MEMORY_ENABLED` · `MEMORY_RELEVANCE_ENABLED` · `MEMORY_TOP_K` · `MEMORY_TOKEN_BUDGET` · `MEMORY_MAX_CHARS` · `USER_MAX_CHARS` · `SUMMARY_ENABLED` · `SUMMARY_TOKEN_BUDGET` |
 | 成本 | `MONTHLY_TOKEN_BUDGET` · `COST_BUDGET_BLOCK` · `WARN_RATIO`                                                                                                        |
 | 安全 | `ALLOW_PRIVATE_EGRESS` · `SHELL_ENABLED` · `TOOL_CONFIRM_LEVEL`                                                                                                    |
-| 工具 | `TOOL_OUTPUT_MAX_CHARS` · `TOOL_OUTPUT_TRUNCATE` · `SAME_TOOL_REPEAT_LIMIT` · `MAX_TOOLS_PER_TURN`                                                                 |
+| 工具 | `TOOL_OUTPUT_MAX_CHARS` · `TOOL_OUTPUT_TRUNCATE` · `TOOL_MODEL_OUTPUT_MAX_CHARS` · `SAME_TOOL_REPEAT_LIMIT` · `MAX_TOOLS_PER_TURN`                                                                 |
 | 其它 | `NODE_ENV` · `PORT` · `HOST` · `DATABASE_PATH` · `MCP_CONFIG_PATH` · `AGENTS_MAX_CHARS` · `SUBAGENT_MAX_CONCURRENCY` · `SUBAGENT_MAX_STEPS` · `CRON_ENABLED` · `SKILL_*` · `BROWSER_*` · `WEB_SEARCH_URL` · `WEB_SEARCH_PROVIDER` · `WEB_SEARCH_API_KEY` · `LOG_LEVEL` |
 
 > 📌 **模型的三个参数用 `LLM_*` 前缀**（不是 `DEFAULT_*`）——

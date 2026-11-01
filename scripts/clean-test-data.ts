@@ -1,5 +1,6 @@
 import { QueryTypes } from 'sequelize';
 import { initDatabase, sequelize } from '../src/db.js';
+import { collectOrphanThreads } from '../src/agent/checkpointer.js';
 import { logger } from '../src/logger.js';
 
 /**
@@ -8,6 +9,7 @@ import { logger } from '../src/logger.js';
  * ```bash
  * yarn data:clean            # 干跑 —— 只报要删什么
  * yarn data:clean --yes      # 真删
+ * yarn data:clean --yes --vacuum   # 真删 + 重建库文件（把空闲页还给磁盘）
  * ```
  *
  * ⚠️ **为什么会有残留** —— 集成测试早期直接写业务库，
@@ -42,6 +44,8 @@ interface CleanupPlan {
   toolLogs: number;
   /** 受影响的月份（**提示用**） */
   months: string[];
+  /** 孤儿 thread 的检查点（**会话早没了、检查点还在**） */
+  orphanCheckpoints: number;
 }
 
 /** 先看清要删什么，再决定删不删 */
@@ -72,6 +76,15 @@ async function plan(): Promise<CleanupPlan> {
     { type: QueryTypes.SELECT, replacements: { names: TEST_TOOL_NAMES } },
   );
 
+  const orphanRows = await sequelize.query<{ n: number }>(
+    `SELECT COUNT(DISTINCT thread_id) AS n
+       FROM graph_checkpoints
+      WHERE type = 'checkpoint'
+        AND thread_id NOT LIKE 'subagent:%'
+        AND thread_id NOT IN (SELECT id FROM sessions)`,
+    { type: QueryTypes.SELECT },
+  );
+
   const cost = costRows[0];
   return {
     costLogs: Number(cost?.n ?? 0),
@@ -79,8 +92,22 @@ async function plan(): Promise<CleanupPlan> {
     sessions: Number(sessionRows[0]?.n ?? 0),
     toolLogs: Number(toolRows[0]?.n ?? 0),
     months: monthRows.map((row) => row.ym).filter((ym) => ym !== ''),
+    orphanCheckpoints: Number(orphanRows[0]?.n ?? 0),
   };
 }
+
+/**
+ * 「可证明是测试产物」的那批空会话（**删之前要先算出来**）。
+ *
+ * 📌 **为什么不能边删边查** ——
+ * `DELETE FROM sessions WHERE ...` 一执行，
+ * 后面的 `WHERE session_id IN (SELECT id FROM sessions ...)` 就查不到了。
+ */
+const EMPTY_TEST_SESSIONS = `SELECT id FROM sessions
+                              WHERE COALESCE(title, '') = ''
+                                AND NOT EXISTS (
+                                  SELECT 1 FROM messages m WHERE m.session_id = sessions.id
+                                )`;
 
 /** 真删 */
 async function apply(): Promise<void> {
@@ -92,11 +119,34 @@ async function apply(): Promise<void> {
     `DELETE FROM tool_call_logs WHERE tool_name IN (:names)`,
     { replacements: { names: TEST_TOOL_NAMES } },
   );
+
+  // 📌 **删会话要连带删它的东西** ——
+  //    直接用 SQL 删会话行会绕过 `deleteSession` 的那套清理，
+  //    于是检查点 / 工具流水全成了孤儿
+  //    （实测：本机库 452 个会话 thread 里有 440 个是孤儿，占掉 3.3 MB）。
   await sequelize.query(
-    `DELETE FROM sessions
-      WHERE COALESCE(title, '') = ''
-        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = sessions.id)`,
+    `DELETE FROM tool_call_logs WHERE session_id IN (${EMPTY_TEST_SESSIONS})`,
   );
+  await sequelize.query(
+    `DELETE FROM graph_checkpoint_writes WHERE thread_id IN (${EMPTY_TEST_SESSIONS})`,
+  );
+  await sequelize.query(
+    `DELETE FROM graph_checkpoints WHERE thread_id IN (${EMPTY_TEST_SESSIONS})`,
+  );
+  await sequelize.query(`DELETE FROM sessions WHERE id IN (${EMPTY_TEST_SESSIONS})`);
+
+  // 📌 **再收一遍历史留下的孤儿** —— 会话早没了、检查点还在的那些
+  const orphans = await collectOrphanThreads();
+  if (orphans > 0) logger.info({ orphans }, '孤儿会话的图检查点已回收');
+
+  // 📌 **重建库文件，把空闲页还给磁盘** ——
+  //    SQLite 删行只把页标成「空闲」，**文件不会自己变小**。
+  //    删了一堆行之后文件还是那么大（实测：清完 3.4 MB 的检查点，
+  //    文件还是 11 MB —— 那 7.6 MB 是空闲页）。
+  if (process.argv.includes('--vacuum')) {
+    console.info('  重建库文件（VACUUM）…');
+    await sequelize.query('VACUUM');
+  }
 }
 
 async function main(): Promise<void> {
@@ -110,17 +160,24 @@ async function main(): Promise<void> {
   console.info(`    占掉的 token：${before.costTokens}`);
   console.info(`  空会话（没有任何消息）：${before.sessions} 个`);
   console.info(`  工具流水（夹具工具）：${before.toolLogs} 条`);
+  console.info(`  孤儿检查点（会话早没了）：${before.orphanCheckpoints} 个会话`);
   if (before.months.length > 0) {
     console.info(`  涉及月份：${before.months.join('、')}`);
   }
 
-  if (before.costLogs === 0 && before.sessions === 0 && before.toolLogs === 0) {
+  if (
+    before.costLogs === 0 &&
+    before.sessions === 0 &&
+    before.toolLogs === 0 &&
+    before.orphanCheckpoints === 0
+  ) {
     console.info('\n✅ 没有测试残留 —— 库里是干净的。');
     return;
   }
 
   if (!confirmed) {
     console.info('\n（干跑 —— 什么也没删。确认要删就加 `--yes`）');
+    console.info('💡 **顺带把空闲页还给磁盘** —— 加 `--vacuum`（重建库文件，删完再跑）');
     console.info('⚠️ **删之前建议先 `yarn backup`** —— 备份在 `backups/`。');
     return;
   }

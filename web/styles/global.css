@@ -563,6 +563,22 @@ html[data-theme='dark'] .atlas-model-pill.is-warn {
   padding-bottom: 8px;
 }
 
+/* 📌 **「显示更早的 N 条消息」** —— 打开长会话时先只渲染最后 150 条 */
+.atlas-show-earlier {
+  align-self: center;
+  padding: 6px 14px;
+  border: 1px solid var(--atlas-line);
+  border-radius: 999px;
+  background: var(--atlas-surface);
+  color: var(--atlas-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.atlas-show-earlier:hover {
+  color: var(--atlas-ink);
+}
+
 .atlas-row-user {
   display: flex;
   justify-content: flex-end;

@@ -96,6 +96,18 @@ export const envSchema = z.object({
   TOOL_OUTPUT_MAX_CHARS: z.coerce.number().int().positive().default(6000),
   TOOL_OUTPUT_TRUNCATE: z.enum(['head', 'tail']).default('tail'),
   /**
+   * ⚠️ **送模型的工具正文上限**（字符）——
+   * 「给用户看的」和「给模型看的」可以不是同一份：
+   * 工具卡片上给人看全文，送模型的是截断版（**上下文按 token 算钱**）。
+   *
+   * 📌 **0 = 不限** —— 默认给一个硬顶（20,000），
+   *    跟 `read_file` 读项目指令文件的上限一样，**当前行为不变**；
+   *    但它堵住了「某个工具开始返回超大内容」这条路。
+   *
+   * 📌 **实测现在用不上** —— 22 次真实工具调用的输出合计只有 3,151 字符。
+   */
+  TOOL_MODEL_OUTPUT_MAX_CHARS: z.coerce.number().int().nonnegative().default(20_000),
+  /**
    * ⚠️ **同一个工具连续调用几次就停**（默认 2）——
    * 模型陷入死循环时，这是唯一的刹车（见 [12-b B4](./12-b-需求-对话与编排.md)）。
    */

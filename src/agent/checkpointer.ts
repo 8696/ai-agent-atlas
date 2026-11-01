@@ -70,6 +70,117 @@ function rowId(threadId: string, ns: string, checkpointId: string, kind: string)
   return `${threadId}|${ns}|${checkpointId}|${kind}`;
 }
 
+/**
+ * 每个 thread **保留多少个检查点**。
+ *
+ * ⚠️ **为什么要有上限** ——
+ * 每个检查点都存**完整的图状态**（全量消息 + 本轮注入的上下文），
+ * 而图每跑一个节点就落一个检查点 →
+ * **检查点行数随步数线性涨，每个体积又随对话变长 → 平方级**。
+ *
+ * 📌 **实测（改之前）**：36 条消息 / 23 个会话的库，
+ * `graph_checkpoints` 攒了 **3,714 行 / 3.46 MB**，
+ * 而真正的对话内容（`messages` 表）只有 5.9 KB —— **八成是检查点**。
+ *
+ * 📌 **留 8 个足够** ——
+ * 恢复只需要「**最新的那个**检查点 + 它的 pending writes」，
+ * 多留几个是为了「挂起期间又跑了几步」这种边缘情况。
+ */
+const KEEP_CHECKPOINTS = 8;
+
+/**
+ * 裁剪一个 thread 的旧检查点 —— **存储不再无限涨**。
+ *
+ * ⚠️ **检查点 id 是时间序的**（UUIDv6）——
+ *    `ORDER BY checkpoint_id DESC` 就是「最新在前」，
+ *    这一点 `fetchCheckpointRow` 已经依赖了。
+ *
+ * 📌 **先删检查点再删 pending writes** ——
+ *    pending writes 挂在 `checkpoint_id` 上，
+ *    检查点没了它就是孤儿（`getTuple` 读不到）。
+ */
+async function pruneThread(threadId: string): Promise<void> {
+  // 📌 **LIMIT 直接写常量** —— 不是用户输入，没有注入面
+  const keep = `SELECT checkpoint_id FROM graph_checkpoints
+                 WHERE thread_id = :threadId AND type = 'checkpoint'
+                 ORDER BY checkpoint_id DESC LIMIT ${KEEP_CHECKPOINTS}`;
+  // ⚠️ **两个 type 一起删** —— 同一个 checkpoint_id 有 `checkpoint` 与 `metadata` 两行
+  await sequelize.query(
+    `DELETE FROM graph_checkpoints
+      WHERE thread_id = :threadId
+        AND checkpoint_id NOT IN (${keep})`,
+    { replacements: { threadId } },
+  );
+  await sequelize.query(
+    `DELETE FROM graph_checkpoint_writes
+      WHERE thread_id = :threadId
+        AND checkpoint_id NOT IN (${keep})`,
+    { replacements: { threadId } },
+  );
+}
+
+/**
+ * 裁剪**所有** thread 的旧检查点 —— **启动时跑一次**。
+ *
+ * 📌 **为什么启动时也要跑** ——
+ * 裁剪只发生在「有新检查点写入」的时候，
+ * 那些再也不用的会话会一直占着空间（只有删会话才清）。
+ */
+export async function pruneAllThreads(): Promise<number> {
+  const rows = await sequelize.query<{ thread_id: string }>(
+    `SELECT DISTINCT thread_id FROM graph_checkpoints WHERE type = 'checkpoint'`,
+    { type: QueryTypes.SELECT },
+  );
+  for (const row of rows) {
+    await pruneThread(row.thread_id);
+  }
+  return rows.length;
+}
+
+/**
+ * 回收**孤儿 thread** 的检查点 —— **会话早没了、检查点还在**。
+ *
+ * 📌 **它们是怎么来的** ——
+ * 删会话走 `deleteSession` 时会连带删检查点，
+ * 但**直接用 SQL 删会话行**的路径（`yarn data:clean`）绕过了那套清理，
+ * 于是检查点就成了孤儿。
+ *
+ * 📌 **实测（本机库）** ——
+ * 452 个会话 thread 里 **440 个是孤儿**，占掉 3.3 MB 检查点里的绝大部分。
+ *
+ * ⚠️ **只回收「既不是会话 id、也不是子代理 thread」的** ——
+ *   - **会话 id**：会话还在 → thread 还有用（可能正挂起等确认）
+ *   - **`subagent:` 开头**：子代理的独立 thread，
+ *     父图挂起时还要靠它恢复（见 `agent/subagent.ts`）
+ *   - **两者都不是**：`thread_id` 就是 `messageId`（**没建会话的裸聊**），
+ *     那种轮次**没法恢复**（确认接口只认会话 id），留着的唯一作用是占空间
+ */
+export async function collectOrphanThreads(): Promise<number> {
+  // ⚠️ **sessions 表可能不存在**（测试库、刚初始化）—— 那就跳过
+  const tables = await sequelize.query<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='sessions'`,
+    { type: QueryTypes.SELECT },
+  );
+  if (tables.length === 0) return 0;
+
+  const rows = await sequelize.query<{ thread_id: string }>(
+    `SELECT DISTINCT thread_id FROM graph_checkpoints
+      WHERE type = 'checkpoint'
+        AND thread_id NOT LIKE 'subagent:%'
+        AND thread_id NOT IN (SELECT id FROM sessions)`,
+    { type: QueryTypes.SELECT },
+  );
+  for (const row of rows) {
+    await sequelize.query('DELETE FROM graph_checkpoint_writes WHERE thread_id = :threadId', {
+      replacements: { threadId: row.thread_id },
+    });
+    await sequelize.query('DELETE FROM graph_checkpoints WHERE thread_id = :threadId', {
+      replacements: { threadId: row.thread_id },
+    });
+  }
+  return rows.length;
+}
+
 export class SqliteCheckpointSaver extends BaseCheckpointSaver {
   /** 读一个检查点（**最新或指定 id**） */
   private async fetchCheckpointRow(
@@ -304,6 +415,10 @@ export class SqliteCheckpointSaver extends BaseCheckpointSaver {
         },
       },
     );
+
+    // 📌 **写完就裁剪旧的** —— 每个检查点都存全量状态，
+    //    不裁剪的话存储是**平方级**涨的（见 `KEEP_CHECKPOINTS` 的注释）
+    await pruneThread(threadId);
 
     return {
       configurable: {

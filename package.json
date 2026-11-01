@@ -33,6 +33,7 @@
     "memory:clear": "tsx scripts/memory.ts clear",
     "search": "tsx scripts/search.ts",
     "cost:report": "tsx scripts/cost-report.ts",
+    "cache:probe": "tsx scripts/cache-probe.ts",
     "backup": "tsx scripts/backup.ts",
     "data:clean": "tsx scripts/clean-test-data.ts",
     "env:sync": "tsx scripts/sync-env.ts",

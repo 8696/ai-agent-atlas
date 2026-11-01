@@ -37,3 +37,33 @@ export function estimateTokensOf(...texts: string[]): number {
   for (const text of texts) total += estimateTokens(text);
   return total;
 }
+
+/**
+ * 推理 token —— **端点不报的时候按「输出 token 减可见正文」估**。
+ *
+ * 📌 **为什么需要** ——
+ * 有些 Anthropic 兼容端点**不单独返回推理 token**：
+ * 智谱的实测就是 —— 带不带 `thinking` 参数，
+ * `usage` 里都只有 `input_tokens` / `output_tokens`，
+ * **但 `output_tokens` 已经把思考算进去了**
+ * （同一个问题：带 thinking 77、无 thinking 64，差的就是思考量）。
+ *
+ * ⚠️ **估出来的值不是端点报的** ——
+ *    调用方要能区分（会话日志里标 `reasoningEstimated`）。
+ *
+ * @param outputTokens 端点报的输出 token（**含思考**）
+ * @param visibleText 可见的正文（**不含思考**）
+ * @param reported 端点**单独报**的推理 token（0 = 没报）
+ * @returns 推理 token
+ */
+export function estimateReasoningTokens(
+  outputTokens: number,
+  visibleText: string,
+  reported: number,
+): number {
+  // 📌 **端点报了就用它** —— 那是准的
+  if (reported > 0) return reported;
+  if (outputTokens <= 0) return 0;
+  // ⚠️ **别估出负数** —— 可见正文比输出 token 还长时（估算偏保守）会越界
+  return Math.min(outputTokens, Math.max(0, outputTokens - estimateTokens(visibleText)));
+}

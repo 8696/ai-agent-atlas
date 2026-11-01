@@ -6,13 +6,13 @@ import { config } from '../../config.js';
 import { logger } from '../../logger.js';
 import { scanInjection, tightenSensitivity } from '../../lib/security/injection.js';
 import { disabledTools } from '../../lib/security/policy.js';
-import { estimateTokens } from '../../lib/tokens.js';
+import { estimateReasoningTokens, estimateTokens } from '../../lib/tokens.js';
 import { writeAudit } from '../../lib/audit.js';
 import {
-  buildSystemPrompt,
+  buildSystemPromptParts,
   promptFallbackNotice,
   readAgentsInstructions,
-  systemMessage,
+  systemMessageParts,
 } from '../../services/prompt.js';
 import {
   resolveFallback,
@@ -163,7 +163,10 @@ export async function planNode(
   const tools = scan.detected ? selected.map((tool) => tightenSensitivity(tool, scan)) : selected;
 
   // ── 上下文 ──
-  const systemPrompt = buildSystemPrompt({
+  // 📌 **拆成稳定段与易变段** —— 缓存断点只打在稳定段末尾，
+  //    端点支持缓存时，记忆 / 检索 / 技能每轮变也不作废整个前缀
+  //    （见 `services/prompt.ts` 的 `buildSystemPromptParts`）
+  const promptParts = buildSystemPromptParts({
     tools: describeTools(tools.map((tool) => tool.name)),
     memories: state.memories || undefined,
     retrieval: state.retrieval || undefined,
@@ -174,11 +177,15 @@ export async function planNode(
     //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）
     agents: readAgentsInstructions(),
   });
+  /** 完整正文（**日志里要看得见模型到底收到了什么**） */
+  const systemPrompt = [promptParts.stable, promptParts.volatile]
+    .filter(Boolean)
+    .join('\n\n---\n\n');
   // 📌 **提示词缓存**（`.env` 的 `LLM_PROMPT_CACHE`）——
-  //    系统提示词每轮重复注入，命中缓存按打折价计费；
-  //    端点不支持会自动退回不缓存（见 `agent/model-stream.ts`）
+  //    断点打在稳定段末尾；端点不支持会自动退回不缓存
+  //    （见 `agent/model-stream.ts`）
   const messages: BaseMessage[] = [
-    systemMessage(systemPrompt, config.LLM_PROMPT_CACHE),
+    systemMessageParts(promptParts.stable, promptParts.volatile, config.LLM_PROMPT_CACHE),
     ...state.messages,
   ];
 
@@ -356,6 +363,14 @@ export async function planNode(
     const conversation = state.messages.map((message) => messageText(message)).join('\n');
     inputTokens = estimateTokens(`${systemPrompt}\n${conversation}`);
   }
+  // 📌 **推理 token：端点不报就估一个** ——
+  //    智谱的 Anthropic 兼容端点**不单独返回推理 token**
+  //    （实测：带不带 thinking 参数，usage 里都只有 input / output），
+  //    但 `output_tokens` **已经把思考算进去了**
+  //    （实测同一个问题：带 thinking 77、无 thinking 64，差的就是思考量）。
+  // ⚠️ **估出来的值会标成「估算」** —— 别把它当成端点报的数。
+  const reasoningReported = reasoningTokens > 0;
+  reasoningTokens = estimateReasoningTokens(outputTokens, text, reasoningTokens);
   usage = inputTokens + outputTokens;
   // 📌 **每轮记一条成本** —— 预算闸的地基（见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
   // ⚠️ **记真正跑的那个模型** —— 切过备用就不能记主模型的账
@@ -400,6 +415,8 @@ export async function planNode(
           inputTokens,
           outputTokens,
           reasoningTokens,
+          // 📌 **推理 token 是端点报的还是估的** —— 别混为一谈
+          reasoningEstimated: !reasoningReported,
           cachedTokens,
           totalTokens: inputTokens + outputTokens,
         },

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRightOutlined } from '@ant-design/icons';
 import type { ChatStatus, UIMessage } from 'ai';
 import { Markdown } from '../../components/Markdown';
@@ -38,14 +38,20 @@ interface Props {
   confirming?: boolean;
 }
 
+/** 一次最多渲染多少条消息（**更早的折叠起来**） */
+const MAX_RENDERED = 150;
+
 const SUGGESTIONS = [
   '你现在能帮我做哪些事？',
   '把这个仓库的目录结构讲一遍',
   '记住：以后都用中文回复我',
 ];
 
-function partText(message: UIMessage, type: 'text' | 'reasoning'): string {
-  return message.parts
+/** 一条消息的 part 数组 */
+type Parts = UIMessage['parts'];
+
+function partText(parts: Parts, type: 'text' | 'reasoning'): string {
+  return parts
     .filter((part) => part.type === type)
     .map((part) => ('text' in part && typeof part.text === 'string' ? part.text : ''))
     .join('');
@@ -63,14 +69,14 @@ type Block =
   | { kind: 'confirm'; payload: PendingConfirmData; resolved: boolean }
   | { kind: 'notice'; text: string };
 
-function toBlocks(message: UIMessage): Block[] {
+function toBlocks(parts: Parts): Block[] {
   const blocks: Block[] = [];
   let buffer = '';
 
   // ⚠️ **已经跑过的工具调用** —— 确认卡片对应的工具如果已经有结果卡片了，
   //    那次确认**已经处理过**，不该还能再点（刷新后仍能点会重复批准）
   const executedToolCalls = new Set(
-    message.parts.flatMap((part) => {
+    parts.flatMap((part) => {
       if (part.type !== 'data-tool-call') return [];
       const data = part.data as ToolCardData | undefined;
       return data?.toolCallId ? [data.toolCallId] : [];
@@ -84,7 +90,7 @@ function toBlocks(message: UIMessage): Block[] {
     }
   };
 
-  for (const part of message.parts) {
+  for (const part of parts) {
     if (part.type === 'text') {
       const text = 'text' in part && typeof part.text === 'string' ? part.text : '';
       buffer += text;
@@ -125,8 +131,8 @@ function toBlocks(message: UIMessage): Block[] {
  * 📌 **命令结果带一个 `data-command` part** —— 正文照常渲染，
  * 只是上面多一个「命令」标签（见 [12-b B9](../docs/12-b-需求-对话与编排.md)）。
  */
-function commandOf(message: UIMessage): { name: string; action?: string } | null {
-  for (const part of message.parts) {
+function commandOf(parts: Parts): { name: string; action?: string } | null {
+  for (const part of parts) {
     if (part.type !== 'data-command') continue;
     const data = part.data as { command?: string; action?: string } | undefined;
     if (!data?.command) continue;
@@ -211,10 +217,122 @@ function ThinkingTrace({ text, live }: { text: string; live: boolean }) {
  *
  * ⚠️ **正在流的那条不算** —— 它本来就没答完，正在生成占位已经说清楚了。
  */
-function isIncomplete(message: UIMessage): boolean {
-  const metadata = message.metadata as { complete?: unknown } | undefined;
-  return metadata?.complete === false;
+function isIncompleteMetadata(metadata: UIMessage['metadata']): boolean {
+  const meta = metadata as { complete?: unknown } | undefined;
+  return meta?.complete === false;
 }
+
+/**
+ * 用户的发言 —— **单独抽出来 + `memo`**。
+ *
+ * 📌 **为什么要 memo** ——
+ * 流式输出时每来一个 chunk，整个消息数组都会换新，
+ * 全部消息一起重渲染 → **每条旧消息的 Markdown 都被重新解析一遍**。
+ * 长会话下这是最主要的卡顿来源。
+ * `memo` 之后只有「正在流的那一条」会重渲染。
+ */
+const UserRow = memo(function UserRow({ parts }: { parts: Parts }) {
+  const text = partText(parts, 'text');
+  return (
+    <div className="atlas-row-user">
+      <div className="atlas-bubble-user">{text}</div>
+      <div className="atlas-avatar atlas-avatar-user" aria-hidden>
+        M
+      </div>
+    </div>
+  );
+});
+
+/** AI 的一条消息（**`memo` —— 理由同 `UserRow`**） */
+const AiRow = memo(function AiRow({
+  messageId,
+  parts,
+  metadata,
+  streaming,
+  last,
+  confirming,
+  onRegenerate,
+  onConfirm,
+}: {
+  messageId: string;
+  parts: Parts;
+  metadata: UIMessage['metadata'];
+  streaming: boolean;
+  /** 是不是最后一条 AI 消息（**决定要不要给「重新生成」**） */
+  last: boolean;
+  confirming: boolean;
+  onRegenerate: (messageId: string) => void;
+  onConfirm?: (
+    approved: boolean,
+    toolCallId: string,
+    fingerprint: string,
+    approveAll?: boolean,
+  ) => void;
+}) {
+  const text = partText(parts, 'text');
+  const reasoning = partText(parts, 'reasoning');
+  const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
+  const blocks = useMemo(() => toBlocks(parts), [parts]);
+  const command = useMemo(() => commandOf(parts), [parts]);
+  /** 这条消息**一个字都还没有** —— 等第一个字 */
+  const empty = blocks.length === 0 && reasoning.length === 0;
+  const incomplete = !streaming && isIncompleteMetadata(metadata);
+
+  return (
+    <article className="atlas-row-ai">
+      <div className="atlas-avatar" aria-hidden>
+        A
+      </div>
+      <div className="atlas-ai-body">
+        {command ? <div className="atlas-cmd-badge">命令 /{command.name}</div> : null}
+        <ThinkingTrace text={reasoning} live={reasoningLive} />
+        {blocks.map((block, index) => {
+          if (block.kind === 'tool') {
+            return (
+              <ToolCallCard key={`tool-${block.card.toolCallId}-${index}`} card={block.card} />
+            );
+          }
+          if (block.kind === 'confirm') {
+            return (
+              <PendingConfirmCard
+                key={`confirm-${block.payload.toolCallId}-${index}`}
+                payload={block.payload}
+                busy={confirming}
+                resolved={block.resolved}
+                onConfirm={(approved, fingerprint, approveAll) =>
+                  onConfirm?.(approved, block.payload.toolCallId, fingerprint, approveAll)
+                }
+              />
+            );
+          }
+          if (block.kind === 'notice') {
+            return <NoticeLine key={`notice-${index}`} text={block.text} />;
+          }
+          const isLastBlock = index === blocks.length - 1;
+          return (
+            <div key={`text-${index}`} className="atlas-answer atlas-markdown">
+              <Markdown>{block.text}</Markdown>
+              {streaming && isLastBlock ? <Caret /> : null}
+            </div>
+          );
+        })}
+        {streaming && empty ? <TypingDots /> : null}
+        {/* 📌 **「答到一半」的提示** —— 刷新后看到半截回答时，
+            要让人一眼看出它**没答完**（不是它就这么答的） */}
+        {incomplete ? (
+          <div className="atlas-incomplete">这条回答没有答完（生成时被打断了）</div>
+        ) : null}
+        {!streaming && last ? (
+          <div className="atlas-ai-tools">
+            <button type="button" className="atlas-redo" onClick={() => onRegenerate(messageId)}>
+              重新生成
+            </button>
+          </div>
+        ) : null}
+      </div>
+    </article>
+  );
+});
 
 export function MessageList({
   messages,
@@ -241,6 +359,15 @@ export function MessageList({
    * 只认 `streaming` 的话，**等首字的那几秒里什么都不显示**。
    */
   const busy = status === 'submitted' || status === 'streaming';
+
+  // 📌 **更早的消息先折叠** ——
+  //    打开一个几百条的老会话时，一次性把几百段 Markdown 都解析出来会明显卡。
+  //    只渲染最后 MAX_RENDERED 条，更早的给一个按钮放出来。
+  //    ⚠️ **不做虚拟滚动** —— 虚拟滚动要算高度、会跟「滚到底」打架，
+  //    而本地单用户的会话普遍不长（实测最长约 10 条），不值得。
+  const [showEarlier, setShowEarlier] = useState(false);
+  const hiddenCount = Math.max(0, messages.length - MAX_RENDERED);
+  const visibleMessages = showEarlier ? messages : messages.slice(hiddenCount);
 
   const lastMessage = messages[messages.length - 1];
 
@@ -287,88 +414,35 @@ export function MessageList({
 
   return (
     <div className="atlas-thread">
-      {messages.map((message) => {
-        const text = partText(message, 'text');
-        const reasoning = partText(message, 'reasoning');
+      {hiddenCount > 0 && !showEarlier ? (
+        <button
+          type="button"
+          className="atlas-show-earlier"
+          onClick={() => setShowEarlier(true)}
+        >
+          显示更早的 {hiddenCount} 条消息
+        </button>
+      ) : null}
+      {visibleMessages.map((message) => {
         const isUser = message.role === 'user';
         const streaming = message.id === liveId;
-        const reasoningLive = streaming && reasoning.length > 0 && text.length === 0;
-        const blocks = toBlocks(message);
-        const command = commandOf(message);
-        /** 这条消息**一个字都还没有** —— 等第一个字 */
-        const empty = blocks.length === 0 && reasoning.length === 0;
 
         if (isUser) {
-          return (
-            <div key={message.id} className="atlas-row-user">
-              <div className="atlas-bubble-user">{text}</div>
-              <div className="atlas-avatar atlas-avatar-user" aria-hidden>
-                M
-              </div>
-            </div>
-          );
+          return <UserRow key={message.id} parts={message.parts} />;
         }
 
         return (
-          <article key={message.id} className="atlas-row-ai">
-            <div className="atlas-avatar" aria-hidden>
-              A
-            </div>
-            <div className="atlas-ai-body">
-              {command ? <div className="atlas-cmd-badge">命令 /{command.name}</div> : null}
-              <ThinkingTrace text={reasoning} live={reasoningLive} />
-              {blocks.map((block, index) => {
-                if (block.kind === 'tool') {
-                  return (
-                    <ToolCallCard
-                      key={`tool-${block.card.toolCallId}-${index}`}
-                      card={block.card}
-                    />
-                  );
-                }
-                if (block.kind === 'confirm') {
-                  return (
-                    <PendingConfirmCard
-                      key={`confirm-${block.payload.toolCallId}-${index}`}
-                      payload={block.payload}
-                      busy={confirming}
-                      resolved={block.resolved}
-                      onConfirm={(approved, fingerprint, approveAll) =>
-                        onConfirm?.(approved, block.payload.toolCallId, fingerprint, approveAll)
-                      }
-                    />
-                  );
-                }
-                if (block.kind === 'notice') {
-                  return <NoticeLine key={`notice-${index}`} text={block.text} />;
-                }
-                const last = index === blocks.length - 1;
-                return (
-                  <div key={`text-${index}`} className="atlas-answer atlas-markdown">
-                    <Markdown>{block.text}</Markdown>
-                    {streaming && last ? <Caret /> : null}
-                  </div>
-                );
-              })}
-              {streaming && empty ? <TypingDots /> : null}
-              {/* 📌 **「答到一半」的提示** —— 刷新后看到半截回答时，
-                  要让人一眼看出它**没答完**（不是它就这么答的） */}
-              {!streaming && isIncomplete(message) ? (
-                <div className="atlas-incomplete">这条回答没有答完（生成时被打断了）</div>
-              ) : null}
-              {!streaming && message.id === lastAssistantId ? (
-                <div className="atlas-ai-tools">
-                  <button
-                    type="button"
-                    className="atlas-redo"
-                    onClick={() => onRegenerate(message.id)}
-                  >
-                    重新生成
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          </article>
+          <AiRow
+            key={message.id}
+            messageId={message.id}
+            parts={message.parts}
+            metadata={message.metadata}
+            streaming={streaming}
+            last={message.id === lastAssistantId}
+            confirming={confirming ?? false}
+            onRegenerate={onRegenerate}
+            onConfirm={onConfirm}
+          />
         );
       })}
 

@@ -39,6 +39,18 @@ export function unregisterSessionStream(sessionId: string): void {
 }
 
 /**
+ * 这个会话是不是**已经在跑一轮了**。
+ *
+ * 📌 **用来当并发闸** —— 同一会话同时跑两张图会互相踩：
+ * `prepare` 节点的 `RemoveMessage(REMOVE_ALL_MESSAGES)` 会把对方
+ * 刚装配好的上下文一起清掉，检查点也会互相覆盖。
+ * （前端只挡了「同一个标签页连点」，**挡不住两个标签页**。）
+ */
+export function isSessionBusy(sessionId: string): boolean {
+  return activeStreams.has(sessionId);
+}
+
+/**
  * 停掉某个会话正在跑的流（**`/stop` 用**）。
  *
  * @returns 有没有真的停掉
