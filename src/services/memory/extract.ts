@@ -4,7 +4,8 @@ import { config } from '../../config.js';
 import { DIRS } from '../../config/paths.js';
 import { logger } from '../../logger.js';
 import { writeAudit } from '../../lib/audit.js';
-import { createChatModel, resolveModel } from '../model.js';
+import { createChatModel } from '../model.js';
+import { resolveUtilityModel } from '../model-utility.js';
 import { recordUsage, usageOf } from '../cost.js';
 import { readTextFile } from '../prompt.js';
 import { scanMemoryWrite } from './scan.js';
@@ -198,7 +199,7 @@ export async function runMemoryExtraction(input: {
     return result;
   }
 
-  const model = resolveModel();
+  const model = resolveUtilityModel();
   if (!model) return result;
 
   // ── T2：调模型抽取 ──

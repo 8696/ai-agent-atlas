@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import {
   assertBrowserUrlAllowed,
+  assertBrowserUrlAllowedAsync,
   domainAllowed,
   parseAllowedDomains,
 } from '../../src/tools/builtin/browser';
+
+/* eslint-disable @typescript-eslint/require-await --
+ * 注入的 `resolve` 是 **异步函数**（签名要求返回 Promise），
+ * 它只返回结果、没有 await。
+ */
 
 /**
  * 浏览器域名白名单的单元测试（见 [12-c C2](../../docs/12-c-需求-工具技能与扩展.md)）。
@@ -69,5 +75,47 @@ describe('浏览器网址校验', () => {
 
   it('⚠️ 协议不对 → 拦住', () => {
     expect(() => assertBrowserUrlAllowed('file:///etc/passwd', [])).toThrow(/http/);
+  });
+});
+
+describe('浏览器网址校验（解析 DNS）', () => {
+  it('⚠️ 域名解析到云元数据地址 → 拦住（白名单空也拦）', async () => {
+    await expect(
+      assertBrowserUrlAllowedAsync(
+        'https://meta-a.example.com/',
+        [],
+        async () => ['169.254.169.254'],
+      ),
+    ).rejects.toThrow(/元数据|链路本地/);
+  });
+
+  it('⚠️ 白名单非空 + 域名解析到内网 → 拦住', async () => {
+    await expect(
+      assertBrowserUrlAllowedAsync(
+        'https://intranet-b.example.com/',
+        ['intranet-b.example.com'],
+        async () => ['10.0.0.5'],
+      ),
+    ).rejects.toThrow(/内网/);
+  });
+
+  it('白名单为空 + 解析到回环 → 放行（回环默认放行）', async () => {
+    await expect(
+      assertBrowserUrlAllowedAsync(
+        'https://local-c.example.com/',
+        [],
+        async () => ['127.0.0.1'],
+      ),
+    ).resolves.toBeTruthy();
+  });
+
+  it('白名单内的域名 + 解析到公网 → 放行', async () => {
+    await expect(
+      assertBrowserUrlAllowedAsync(
+        'https://good-d.example.com/',
+        ['good-d.example.com'],
+        async () => ['1.1.1.1'],
+      ),
+    ).resolves.toBeTruthy();
   });
 });

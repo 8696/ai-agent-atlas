@@ -45,6 +45,27 @@ export const envSchema = z.object({
   LLM_FALLBACK_BASE_URL: z.string().optional(),
   LLM_FALLBACK_API_KEY: z.string().optional(),
   LLM_FALLBACK_MODEL: z.string().optional(),
+  /**
+   * ⚠️ **辅助模型**（**留空 = 没有**）——
+   * 记忆抽取 / 会话摘要 / 跨会话检索摘要走它。
+   *
+   * 📌 **为什么值得单独配一个** —— 这三件事是「脏活」：
+   *   输入长、输出短、不需要多强的推理。
+   *   拿主模型（尤其是开了思考的）干这些活，**钱花得最冤**。
+   *   配一个便宜的小模型，这部分成本能砍一大截。
+   */
+  LLM_AUX_BASE_URL: z.string().optional(),
+  LLM_AUX_API_KEY: z.string().optional(),
+  LLM_AUX_MODEL: z.string().optional(),
+  /**
+   * ⚠️ **提示词缓存**（Anthropic 的 `cache_control`）——
+   * 系统提示词每轮都要重复注入（AGENTS.md + 记忆 + 技能 + 工具清单），
+   * 缓存命中时这部分**按打折价计费**。
+   *
+   * 📌 **默认关** —— 国产兼容端点未必支持，
+   *    支持的话（报 400 里带 `cache_control`）会自动退回不缓存。
+   */
+  LLM_PROMPT_CACHE: boolFromEnv(false),
   /** 推理预算（默认 1024 = 开，0 = 关）—— ⚠️ Anthropic 要求 `LLM_MAX_TOKENS > 预算` */
   LLM_THINKING_BUDGET: z.coerce.number().int().nonnegative().default(1024),
   /** 单次输出上限 */
@@ -81,9 +102,27 @@ export const envSchema = z.object({
   SAME_TOOL_REPEAT_LIMIT: z.coerce.number().int().min(1).default(2),
   /**
    * 联网搜索后端（SearXNG 兼容，形如 `http://127.0.0.1:8888/search`）。
-   * ⚠️ **留空 = 不注册 `web_search` 工具** —— 模型看不到一个必然失败的工具。
+   * ⚠️ **只在 `WEB_SEARCH_PROVIDER=searxng` 时用**。
    */
   WEB_SEARCH_URL: z.string().optional(),
+  /**
+   * ⚠️ **搜索后端类型** —— `auto`（默认）/ `searxng` / `tavily` / `brave` / `duckduckgo`。
+   *
+   * 📌 **`auto` 的判定顺序**：
+   * 配了 `WEB_SEARCH_URL` → searxng；配了 `WEB_SEARCH_API_KEY` → tavily；
+   * 都没配 → **duckduckgo**（**免 key** —— 工具始终可用）。
+   */
+  WEB_SEARCH_PROVIDER: z.enum(['auto', 'searxng', 'tavily', 'brave', 'duckduckgo']).default('auto'),
+  /** 搜索后端的 API Key（**tavily / brave 用**） */
+  WEB_SEARCH_API_KEY: z.string().optional(),
+  /**
+   * ⚠️ **单轮 token 上限**（**0 = 不限**）——
+   * 一轮里累计用掉的 token 超过这个数就收尾，不再继续调工具。
+   *
+   * 📌 **默认不限** —— 不擅自加限制；
+   *    想要「一轮别烧太多」就把它设成一个数（比如 60000）。
+   */
+  MAX_TOKENS_PER_TURN: z.coerce.number().int().nonnegative().default(0),
   /** 会话保留天数（超期连同消息一起清掉；收藏的会话不清） */
   SESSION_RETENTION_DAYS: z.coerce.number().int().positive().default(90),
 
@@ -113,13 +152,23 @@ export const envSchema = z.object({
   SUBAGENT_MAX_CONCURRENCY: z.coerce.number().int().positive().default(3),
   /** 单个子代理的工具步数上限 */
   SUBAGENT_MAX_STEPS: z.coerce.number().int().positive().default(8),
+  /**
+   * ⚠️ **子代理能再派几层**（默认 2 —— 主代理 + 子代理 + 孙代理）。
+   *
+   * 📌 **1 = 只有主代理能派**（旧行为，防递归）；
+   *    2 = 子代理还能派孙代理（「并行调研 → 汇总 → 成稿」这种三层活才做得成）。
+   */
+  SUBAGENT_MAX_DEPTH: z.coerce.number().int().min(1).max(3).default(2),
   /** 定时任务总开关 */
   CRON_ENABLED: boolFromEnv(true),
   /** 技能自动沉淀总开关 */
   SKILL_AUTOCREATE_ENABLED: boolFromEnv(true),
-  /** ⚠️ 沉淀技能所需的**最少工具调用次数**（对齐 Hermes 的 5+ 次门槛）——
-   *  闲聊（0 次工具调用）不该沉淀技能 */
-  SKILL_MIN_TOOL_CALLS: z.coerce.number().int().nonnegative().default(5),
+  /** ⚠️ 沉淀技能所需的**最少工具调用次数**（对齐 Hermes 的「多次工具调用才合成技能」——
+   *  闲聊（0 次工具调用）不该沉淀技能）
+   *  📌 **默认 4，比 `MAX_TOOL_STEPS`（5）少一档** ——
+   *  两个都是 5 的时候，沉淀提问**只会在「工具预算用满」的那一刻**才触发，
+   *  平时跑满 4 次工具调用就答完的复杂活反而沉淀不下来 */
+  SKILL_MIN_TOOL_CALLS: z.coerce.number().int().nonnegative().default(4),
   /** 每轮最多注入几个技能（**按相关度取前 N**） */
   SKILL_TOP_K: z.coerce.number().int().positive().default(3),
   /** 注入技能说明的 token 预算（**超了就不注入下一条**） */
@@ -185,6 +234,19 @@ export function validateRelations(env: Env): string[] {
     if (fallbackProblem) problems.push(`LLM_FALLBACK_BASE_URL 不合法：${fallbackProblem}`);
     if (!env.LLM_FALLBACK_API_KEY && !isLoopbackUrl(env.LLM_FALLBACK_BASE_URL)) {
       problems.push('备用模型缺 LLM_FALLBACK_API_KEY（本地端点可以不要 Key）');
+    }
+  }
+
+  // 辅助模型：三项要么都给，要么都不给（**留空 = 走主模型**）
+  const aux = [env.LLM_AUX_MODEL, env.LLM_AUX_BASE_URL, env.LLM_AUX_API_KEY];
+  if (aux.some(Boolean) && !(aux[0] && aux[1])) {
+    problems.push('辅助模型（LLM_AUX_MODEL / LLM_AUX_BASE_URL）要么都给，要么都不给');
+  } else if (aux[0] && aux[1]) {
+    // ⚠️ **辅助模型也要过端点校验** —— 别让它变成一条绕过闸的旁路
+    const auxProblem = modelEndpointProblem(env.LLM_AUX_BASE_URL);
+    if (auxProblem) problems.push(`LLM_AUX_BASE_URL 不合法：${auxProblem}`);
+    if (!env.LLM_AUX_API_KEY && !isLoopbackUrl(env.LLM_AUX_BASE_URL)) {
+      problems.push('辅助模型缺 LLM_AUX_API_KEY（本地端点可以不要 Key）');
     }
   }
 

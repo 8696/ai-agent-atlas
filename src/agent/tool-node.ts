@@ -104,6 +104,8 @@ export interface RunToolCallOptions {
   signal?: AbortSignal | undefined;
   /** 已被用户拒绝过的调用（**指纹集合**） */
   rejected?: ReadonlySet<string>;
+  /** ⚠️ **当前是第几层代理**（0 = 主代理）—— 传给工具 */
+  depth?: number | undefined;
   /**
    * 自动放行的工具（**无人值守场景** —— 定时任务里显式声明的）。
    *
@@ -294,8 +296,12 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
     }
 
     // ⚠️ **参数变了 → 重新确认** —— 不能沿用旧的批准
-    if (resume.fingerprint && resume.fingerprint !== fingerprint) {
-      interrupt({ ...payload, risk: `${riskOf(tool, effectiveSensitivity)}（参数已变化，需要重新确认）` });
+    // 📌 **没带指纹一样要重新确认** —— 「没传」不等于「沿用」；
+    //    批准只对**这一组参数**有效，指纹对不上就再问一次
+    //    （见 [12-b B5](./docs/12-b-需求-对话与编排.md)）
+    if (resume.fingerprint !== fingerprint) {
+      const why = resume.fingerprint ? '参数已变化' : '批准没有带上参数指纹';
+      interrupt({ ...payload, risk: `${riskOf(tool, effectiveSensitivity)}（${why}，需要重新确认）` });
     }
   }
 
@@ -313,6 +319,8 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
       ...(options.signal ? { signal: options.signal } : {}),
       // 📌 **带上调用 id** —— 子代理靠它算稳定的 thread_id
       toolCallId: call.id,
+      // 📌 **带上深度** —— 子代理靠它判断「还能不能再派一层」
+      ...(options.depth !== undefined ? { depth: options.depth } : {}),
       // 📌 **注入命中的特征要传进去** —— 沙箱里的 RPC 调用要在自己的闸上再判一次
       ...(options.injection?.detected ? { injectionMatches: options.injection.matches } : {}),
     });
@@ -396,7 +404,10 @@ export async function runToolCall(options: RunToolCallOptions): Promise<ToolExec
   }
 
   return finish({
-    content: markUntrusted(clipped.text, tool.name),
+    // ⚠️ **出参也要打码** —— 工具读到的密钥不能进图状态
+    //    （检查点 `graph_checkpoints` / 消息表 / parts 都从这一份出去，
+    //    工具结果一旦带密钥就会**一路明文落库**）
+    content: markUntrusted(maskString(clipped.text), tool.name),
     card: {
       ...card,
       status: ok ? 'success' : 'error',

@@ -1,5 +1,8 @@
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import http from 'node:http';
+import https from 'node:https';
+import zlib from 'node:zlib';
 
 /**
  * 出网校验 —— **HTTP 类工具的第二道门**（见 [10 §10.5](../../docs/10-安全方案.md)）。
@@ -9,11 +12,19 @@ import { isIP } from 'node:net';
  *   ① 协议只允许 http / https
  *   ② 解析目标域名 → IP
  *   ③ 判 IP 是否属私网 / 回环 / 链路本地 / 云元数据
- *   ④ 请求（带超时）
+ *   ④ 请求（带超时）—— ⚠️ **连到第 ② 步解析出来的那个 IP**
  *   ⑤ 遇到重定向 → 对新地址回到 ②（逐跳校验）
  * ```
  *
  * ⚠️ **只校验第一跳等于没校验** —— 换个 `Location` 就出去了。
+ *
+ * ⚠️ **校验完还不够，得把 IP 钉住**（DNS rebinding）——
+ *   攻击者控制 DNS：第一次解析给公网 IP（校验通过），
+ *   第二次解析给 `127.0.0.1`（请求真的连到本机）。
+ *   所以这里**自己解析 DNS**，再把连接**钉到那个已校验的 IP**
+ *   （`lookup` 回调只吐已校验的地址）——
+ *   ⚠️ **TLS 仍然按域名校验证书**（`servername` 走原主机名），
+ *   钉 IP 不影响 HTTPS 的正确性。
  */
 
 /** 出网被拦 */
@@ -105,6 +116,31 @@ export async function assertEgressAllowed(
   rawUrl: string,
   options: EgressOptions,
 ): Promise<URL> {
+  const target = await resolveTarget(rawUrl, options);
+  return target.url;
+}
+
+/** 一次校验的结果（**URL + 已校验的 IP**） */
+export interface EgressTarget {
+  /** 目标地址 */
+  url: URL;
+  /**
+   * **已校验过的 IP 列表** —— 请求只连这些地址。
+   *
+   * ⚠️ **这就是「钉住 IP」** —— 不给 `fetch` 二次解析的机会。
+   */
+  addresses: string[];
+}
+
+/**
+ * 校验一个 URL 并**把它解析成已校验的 IP**。
+ *
+ * ⚠️ **IP 字面量也要过私网判定** —— 直接写 `http://127.0.0.1/` 一样要拦。
+ */
+export async function resolveTarget(
+  rawUrl: string,
+  options: EgressOptions,
+): Promise<EgressTarget> {
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -129,7 +165,7 @@ export async function assertEgressAllowed(
     if (!options.allowPrivate && isPrivateAddress(hostname)) {
       throw new EgressError(`拒绝访问内网地址（${hostname}）`, 'PRIVATE_ADDRESS');
     }
-    return url;
+    return { url, addresses: [hostname] };
   }
 
   const resolve = options.resolve ?? defaultResolve;
@@ -156,7 +192,7 @@ export async function assertEgressAllowed(
     }
   }
 
-  return url;
+  return { url, addresses };
 }
 
 export interface GuardedFetchOptions extends EgressOptions {
@@ -186,9 +222,234 @@ export interface GuardedResponse {
 }
 
 /**
+ * 一个只吐「已校验 IP」的 DNS 回调 —— **把连接钉住**。
+ *
+ * ⚠️ **Node 可能要 `all: true` 的数组形式**（`autoSelectFamily`）——
+ *    两种都要支持，只给一种会连不上。
+ */
+function pinnedLookup(
+  addresses: string[],
+): (
+  hostname: string,
+  options: unknown,
+  callback: (...args: never[]) => void,
+) => void {
+  const list = addresses
+    .map((address) => ({ address, family: isIP(address) }))
+    .filter((item) => item.family !== 0);
+  return (_hostname, options, callback) => {
+    const wantsAll =
+      typeof options === 'object' &&
+      options !== null &&
+      (options as { all?: unknown }).all === true;
+    if (wantsAll) {
+      (callback as unknown as (err: Error | null, addrs: typeof list) => void)(null, list);
+      return;
+    }
+    const first = list[0];
+    if (!first) {
+      (callback as unknown as (err: Error | null) => void)(new Error('没有可用的目标地址'));
+      return;
+    }
+    (
+      callback as unknown as (err: Error | null, address: string, family: number) => void
+    )(null, first.address, first.family);
+  };
+}
+
+/** 请求头的键统一小写查（**调用方可能写 `Content-Type`**） */
+function hasHeader(headers: Record<string, string>, name: string): boolean {
+  return Object.keys(headers).some((key) => key.toLowerCase() === name);
+}
+
+/** 一次请求的结果（**重定向单独拎出来**） */
+interface RawResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  bodyLength: number;
+  truncated: boolean;
+  /** 有 `Location` 且是 3xx 时给出（**正文不读**） */
+  redirect?: string | undefined;
+}
+
+/**
+ * 发一次请求（**连到已校验的 IP**）。
+ *
+ * ⚠️ **不用 `fetch`** —— `fetch` 会自己再解析一次 DNS，
+ *    DNS rebinding 就是从那道缝里钻进来的。
+ *    这里用 `node:http` / `node:https`，
+ *    **用 `lookup` 钩子把解析结果换成已校验的 IP**，
+ *    而 `Host` 头与 TLS 的 SNI 仍然走原主机名（证书校验照常生效）。
+ */
+async function requestOnce(
+  target: EgressTarget,
+  options: {
+    method: string | undefined;
+    headers: Record<string, string> | undefined;
+    body: string | undefined;
+    timeoutMs: number;
+    maxBytes: number;
+  },
+): Promise<RawResponse> {
+  const { url, addresses } = target;
+  const isHttps = url.protocol === 'https:';
+  const lib = isHttps ? https : http;
+  // ⚠️ **IPv6 字面量要去掉方括号** —— `new URL()` 的 hostname 带括号
+  const hostname = url.hostname.replace(/^\[/, '').replace(/\]$/, '');
+
+  const headers: Record<string, string> = { ...(options.headers ?? {}) };
+  // 📌 **默认收压缩** —— 与 `fetch` 的默认行为一致
+  if (!hasHeader(headers, 'accept-encoding')) {
+    headers['accept-encoding'] = 'gzip, deflate, br';
+  }
+  if (options.body !== undefined && !hasHeader(headers, 'content-length')) {
+    headers['content-length'] = String(Buffer.byteLength(options.body));
+  }
+
+  return new Promise<RawResponse>((resolve, reject) => {
+    let settled = false;
+    // 📌 **用一个盒子装请求** —— 超时的回调要在请求建好之前就存在
+    const holder: { req?: http.ClientRequest } = {};
+    const timer = setTimeout(() => {
+      holder.req?.destroy(new EgressError(`请求超时（${options.timeoutMs}ms）`, 'TIMEOUT'));
+    }, options.timeoutMs);
+    timer.unref?.();
+
+    const finish = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
+
+    const req = lib.request(
+      {
+        protocol: url.protocol,
+        hostname,
+        port: url.port || (isHttps ? 443 : 80),
+        path: `${url.pathname}${url.search}`,
+        method: options.method ?? 'GET',
+        headers,
+        // ⚠️ **TLS 的 SNI 与证书校验仍然用主机名** —— 钉 IP 不影响 HTTPS
+        ...(isHttps ? { servername: hostname } : {}),
+        // 📌 **把连接钉到已校验的 IP** —— 不给二次解析的机会
+        lookup: pinnedLookup(addresses),
+      },
+      (res) => {
+        const status = res.statusCode ?? 0;
+        const responseHeaders: Record<string, string> = {};
+        for (const [key, value] of Object.entries(res.headers)) {
+          if (value === undefined) continue;
+          responseHeaders[key] = Array.isArray(value) ? value.join(', ') : String(value);
+        }
+
+        // ⚠️ **重定向的正文不要** —— 释放连接，别占着不放
+        const location = responseHeaders['location'];
+        if (location && status >= 300 && status < 400) {
+          res.resume();
+          finish(() =>
+            resolve({
+              status,
+              headers: responseHeaders,
+              body: '',
+              bodyLength: 0,
+              truncated: false,
+              redirect: location,
+            }),
+          );
+          return;
+        }
+
+        readDecoded(res, options.maxBytes).then(
+          (read) =>
+            finish(() =>
+              resolve({
+                status,
+                headers: responseHeaders,
+                body: read.body,
+                bodyLength: read.bodyLength,
+                truncated: read.truncated,
+              }),
+            ),
+          (err: unknown) =>
+            finish(() => reject(toEgressError(err))),
+        );
+      },
+    );
+
+    holder.req = req;
+
+    req.on('error', (err: unknown) => {
+      finish(() => reject(toEgressError(err)));
+    });
+
+    if (options.body !== undefined) req.write(options.body);
+    req.end();
+  });
+}
+
+/** 任何错误都包成 `EgressError`（**带上错误码**） */
+function toEgressError(err: unknown): EgressError {
+  if (err instanceof EgressError) return err;
+  return new EgressError(
+    `请求失败：${err instanceof Error ? err.message : String(err)}`,
+    'REQUEST_FAILED',
+  );
+}
+
+/**
+ * 读正文（**最多 `maxBytes` 字节**，**解压后算**）。
+ *
+ * ⚠️ **边读边限量** —— 整个 body 进内存会被大文件撑爆。
+ * ⚠️ **`content-encoding` 要自己解** —— `node:http` 不像 `fetch` 那样自动解压。
+ */
+async function readDecoded(
+  res: http.IncomingMessage,
+  maxBytes: number,
+): Promise<{ body: string; bodyLength: number; truncated: boolean }> {
+  const encoding = (res.headers['content-encoding'] ?? '').toLowerCase().trim();
+  let stream: AsyncIterable<Buffer | Uint8Array | string> = res;
+  if (encoding === 'gzip') stream = res.pipe(zlib.createGunzip());
+  else if (encoding === 'deflate') stream = res.pipe(zlib.createInflate());
+  else if (encoding === 'br') stream = res.pipe(zlib.createBrotliDecompress());
+
+  const chunks: Buffer[] = [];
+  let bodyLength = 0;
+  let truncated = false;
+
+  try {
+    for await (const chunk of stream) {
+      const buffer = typeof chunk === 'string' ? Buffer.from(chunk, 'utf8') : Buffer.from(chunk);
+      bodyLength += buffer.length;
+      if (bodyLength > maxBytes) {
+        const keep = Math.max(0, maxBytes - (bodyLength - buffer.length));
+        chunks.push(buffer.subarray(0, keep));
+        truncated = true;
+        res.destroy();
+        break;
+      }
+      chunks.push(buffer);
+    }
+  } catch (err) {
+    throw new EgressError(
+      `读响应失败：${err instanceof Error ? err.message : String(err)}`,
+      'REQUEST_FAILED',
+    );
+  }
+
+  return {
+    body: Buffer.concat(chunks).toString('utf8'),
+    bodyLength,
+    truncated,
+  };
+}
+
+/**
  * 发一个「校验过每一跳」的 HTTP 请求。
  *
- * ⚠️ **重定向逐跳校验** —— 每跳都回到 `assertEgressAllowed`。
+ * ⚠️ **重定向逐跳校验** —— 每跳都回到 `resolveTarget()`。
+ * ⚠️ **每一跳都重新钉 IP** —— 跳到新域名就重新解析、重新校验、重新钉住。
  */
 export async function guardedFetch(
   rawUrl: string,
@@ -197,93 +458,30 @@ export async function guardedFetch(
   let current = rawUrl;
 
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-    const url = await assertEgressAllowed(current, options);
+    const target = await resolveTarget(current, options);
+    const response = await requestOnce(target, {
+      method: options.method,
+      headers: options.headers,
+      body: options.body,
+      timeoutMs: options.timeoutMs,
+      maxBytes: options.maxBytes,
+    });
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), options.timeoutMs);
-    let response: Response;
-    try {
-      response = await fetch(url, {
-        method: options.method ?? 'GET',
-        ...(options.headers ? { headers: options.headers } : {}),
-        ...(options.body ? { body: options.body } : {}),
-        redirect: 'manual',
-        signal: controller.signal,
-      });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : String(err);
-      clearTimeout(timer);
-      throw new EgressError(
-        controller.signal.aborted ? `请求超时（${options.timeoutMs}ms）` : `请求失败：${reason}`,
-        controller.signal.aborted ? 'TIMEOUT' : 'REQUEST_FAILED',
-      );
+    // ⚠️ **重定向 → 回到校验**（连到新地址就重新解析、重新判、重新钉）
+    if (response.redirect) {
+      current = new URL(response.redirect, target.url).toString();
+      continue;
     }
 
-    try {
-      const location = response.headers.get('location');
-      if (location && response.status >= 300 && response.status < 400) {
-        // ⚠️ **重定向的正文不要** —— 释放连接，别占着不放
-        await response.body?.cancel();
-        current = new URL(location, url).toString();
-        continue;
-      }
-
-      // ⚠️ **边读边限量** —— 整个 body 进内存会被大文件撑爆
-      const { body, bodyLength, truncated } = await readBounded(response, options.maxBytes);
-
-      const headers: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        headers[key] = value;
-      });
-
-      return {
-        status: response.status,
-        headers,
-        body,
-        bodyLength,
-        truncated,
-        finalUrl: url.toString(),
-      };
-    } finally {
-      // ⚠️ **读完正文才清超时** —— 慢速的正文也能被杀掉
-      clearTimeout(timer);
-    }
+    return {
+      status: response.status,
+      headers: response.headers,
+      body: response.body,
+      bodyLength: response.bodyLength,
+      truncated: response.truncated,
+      finalUrl: target.url.toString(),
+    };
   }
 
   throw new EgressError(`重定向超过 ${MAX_REDIRECTS} 跳`, 'TOO_MANY_REDIRECTS');
-}
-
-/**
- * 读正文（**最多 `maxBytes` 字节**）。
- *
- * ⚠️ **不是 `arrayBuffer()`** —— 那会把整个 body 读进内存，
- * 一个 1GB 的下载就能把进程撑爆。
- */
-async function readBounded(
-  response: Response,
-  maxBytes: number,
-): Promise<{ body: string; bodyLength: number; truncated: boolean }> {
-  const reader = response.body?.getReader();
-  if (!reader) return { body: '', bodyLength: 0, truncated: false };
-
-  const decoder = new TextDecoder();
-  let body = '';
-  let bodyLength = 0;
-  let truncated = false;
-
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    bodyLength += value.byteLength;
-    if (bodyLength > maxBytes) {
-      truncated = true;
-      const keep = Math.max(0, maxBytes - (bodyLength - value.byteLength));
-      body += decoder.decode(value.subarray(0, keep), { stream: true });
-      await reader.cancel();
-      break;
-    }
-    body += decoder.decode(value, { stream: true });
-  }
-
-  return { body, bodyLength, truncated };
 }

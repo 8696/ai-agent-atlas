@@ -183,3 +183,56 @@ describe('会话管理（[12-b B2](../docs/12-b-需求-对话与编排.md)）', 
     expect(list.items.some((item) => item.id === created.id)).toBe(true);
   });
 });
+
+describe('会话导出（[12-b B2](../docs/12-b-需求-对话与编排.md)）', () => {
+  it('GET /sessions/:id/export → Markdown（含对话正文）', async () => {
+    const created = await createSession();
+    await Message.create({
+      id: 'export-message',
+      session_id: created.id,
+      role: 'user',
+      content: '导出测试',
+      favorite: 0,
+      created_at: '2026-10-31 10:00:00.000',
+      updated_at: '2026-10-31 10:00:00.000',
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/sessions/${created.id}/export`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/markdown');
+    expect(response.headers.get('content-disposition')).toContain('attachment');
+
+    const text = await response.text();
+    expect(text).toContain('# ');
+    expect(text).toContain('导出测试');
+    expect(text).toContain('会话 id');
+  });
+
+  it('?format=json → 完整消息与 parts', async () => {
+    const created = await createSession();
+    await Message.create({
+      id: 'export-json-message',
+      session_id: created.id,
+      role: 'assistant',
+      content: '回答',
+      parts: JSON.stringify([{ type: 'text', text: '回答' }]),
+      favorite: 0,
+      created_at: '2026-10-31 10:00:00.000',
+      updated_at: '2026-10-31 10:00:00.000',
+    });
+
+    const response = await fetch(`${baseUrl}/api/v1/sessions/${created.id}/export?format=json`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as {
+      session: { id: string };
+      messages: Array<{ content: string; parts: Array<{ type: string }> }>;
+    };
+    expect(body.session.id).toBe(created.id);
+    expect(body.messages.some((message) => message.content === '回答')).toBe(true);
+  });
+
+  it('⚠️ 会话不存在 → 404', async () => {
+    const response = await fetch(`${baseUrl}/api/v1/sessions/does-not-exist/export`);
+    expect(response.status).toBe(404);
+  });
+});

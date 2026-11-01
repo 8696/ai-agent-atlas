@@ -61,6 +61,15 @@ export interface McpServerState {
 /** 重连退避上限（毫秒） */
 const MAX_BACKOFF_MS = 30_000;
 
+/**
+ * 去掉注册表改名时加的前缀 —— `mcp__<server>__<tool>` → `<server>__<tool>`。
+ *
+ * 📌 **只去一层** —— 原始名本身也可能带 `mcp__`。
+ */
+export function stripMcpPrefix(toolName: string): string {
+  return toolName.startsWith('mcp__') ? toolName.slice('mcp__'.length) : toolName;
+}
+
 /** 管理器 */
 export class McpManager {
   /** server 配置 */
@@ -232,12 +241,34 @@ export class McpManager {
   }
 
   /**
+   * 测试用：登记一个 server 与它的工具路由（**不连 server**）。
+   *
+   * 📌 **给「改名后还能不能查到策略」那条测试用** ——
+   *    真连一个 server 太重，路由与策略的映射关系是纯逻辑。
+   */
+  registerForTest(
+    server: McpServerConfig,
+    routes: Array<{ name: string; tool: string }>,
+  ): void {
+    this.configs.set(server.name, server);
+    for (const route of routes) {
+      this.routes.set(route.name, { server: server.name, tool: route.tool });
+    }
+  }
+
+  /**
    * 工具的策略（**server 粒度**）。
    *
    * ⚠️ **默认 `ask`** —— 第三方来源一律要确认（见 [12-c C3](./docs/12-c-需求-工具技能与扩展.md)）。
+   *
+   * 📌 **改名后的工具名也能查到** —— 注册表撞名时会把 MCP 工具改成
+   *    `mcp__<原名>`（见 [12-c C1](./12-c-需求-工具技能与扩展.md)），
+   *    而这里的路由表记的是**改名前**的名字；
+   *    不处理的话，`toolPolicy: 'auto'` 这种策略会在改名后**查不到**，
+   *    工具被平白地多问一次。
    */
   policyFor(toolName: string): 'ask' | 'auto' | 'off' | undefined {
-    const route = this.routes.get(toolName);
+    const route = this.routes.get(toolName) ?? this.routes.get(stripMcpPrefix(toolName));
     if (!route) return undefined;
     const server = this.configs.get(route.server);
     return server?.toolPolicy;

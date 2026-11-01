@@ -208,12 +208,22 @@ function postChat(
 }
 
 /** 批准 / 取消 */
-function postConfirm(sessionId: string, approved: boolean): Promise<Response> {
+function postConfirm(
+  sessionId: string,
+  approved: boolean,
+  fingerprint?: string,
+): Promise<Response> {
   return fetch(`${baseUrl}/api/v1/chat/confirm`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, approved }),
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId, approved, ...(fingerprint ? { fingerprint } : {}) }),
   });
+}
+
+/** 从待确认的 chunk 里取出参数指纹（**批准必须带**） */
+function fingerprintOf(chunk: Chunk): string | undefined {
+  const payload = chunk['data'] as { fingerprint?: string } | undefined;
+  return payload?.fingerprint;
 }
 
 describe('子代理（[12-b B10](../docs/12-b-需求-对话与编排.md)）', () => {
@@ -338,7 +348,7 @@ describe('子代理（[12-b B10](../docs/12-b-需求-对话与编排.md)）', ()
         const payload = chunk['data'] as { toolName?: string };
         // 📌 **弹的是子代理要用的那个工具**
         expect(payload.toolName).toBe('danger_tool');
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 
@@ -403,7 +413,7 @@ describe('子代理（[12-b B10](../docs/12-b-需求-对话与编排.md)）', ()
       if (chunk.type === 'data-pending-confirm' && !confirmed) {
         confirmed = true;
         await new Promise((resolve) => setTimeout(resolve, humanWaitMs));
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 

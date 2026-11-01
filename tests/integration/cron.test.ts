@@ -254,3 +254,49 @@ describe('定时任务调度', () => {
     expect(messages.filter((message) => message.content.includes('第一次'))).toHaveLength(1);
   });
 });
+
+describe('定时任务工具（对话内管理）', () => {
+  it('add → list → disable → remove 全链路可用', async () => {
+    const { cronTool } = await import('../../src/tools/builtin/cron.js');
+
+    const added = await cronTool.invoke(
+      { action: 'add', name: '日报', schedule: '0 9 * * *', prompt: '提醒我看日报' },
+      { sessionId: 'session-cron-tool' },
+    );
+    expect(added.ok).toBe(true);
+    const id = (added.data as { id?: string }).id;
+    expect(id).toBeTruthy();
+
+    // 📌 **任务写进当前会话** —— 结果落在用户正在聊的会话里
+    const task = loadCronTasks().find((item) => item.id === id);
+    expect(task?.sessionId).toBe('session-cron-tool');
+    expect(task?.cron).toBe('0 9 * * *');
+
+    const listed = await cronTool.invoke({ action: 'list' }, {});
+    expect(listed.output).toContain('日报');
+
+    const disabled = await cronTool.invoke({ action: 'disable', id }, {});
+    expect(disabled.ok).toBe(true);
+    expect(loadCronTasks().find((item) => item.id === id)?.enabled).toBe(false);
+
+    const removed = await cronTool.invoke({ action: 'remove', id }, {});
+    expect(removed.ok).toBe(true);
+    expect(loadCronTasks().find((item) => item.id === id)).toBeUndefined();
+  });
+
+  it('⚠️ 缺参数 → 明确报错，不装成功', async () => {
+    const { cronTool } = await import('../../src/tools/builtin/cron.js');
+
+    const noSchedule = await cronTool.invoke({ action: 'add', prompt: 'x' }, {});
+    expect(noSchedule.ok).toBe(false);
+    expect(noSchedule.output).toContain('schedule');
+
+    const noPrompt = await cronTool.invoke({ action: 'add', schedule: '0 9 * * *' }, {});
+    expect(noPrompt.ok).toBe(false);
+    expect(noPrompt.output).toContain('prompt');
+
+    const unknown = await cronTool.invoke({ action: 'remove', id: '不存在的 id' }, {});
+    expect(unknown.ok).toBe(false);
+    expect(unknown.output).toContain('没有这个定时任务');
+  });
+});

@@ -181,6 +181,33 @@ describe('斜杠命令（[12-b B9](../docs/12-b-需求-对话与编排.md)）', 
     expect(text).toContain('fake-model');
   });
 
+  it('/context → 上下文构成报告（**零模型调用**）', async () => {
+    const sessionId = await createSession();
+    modelCalls = 0;
+
+    const { text } = await sendCommand(sessionId, '/context');
+
+    expect(text).toContain('上下文构成');
+    expect(text).toContain('系统提示词');
+    expect(text).toContain('项目指令');
+    expect(text).toContain('工具池');
+    // ⚠️ **零 token 消耗** —— 这条命令的价值就在于「不花钱也能查」
+    expect(modelCalls).toBe(0);
+  });
+
+  it('/context <问题> → 额外算出动态段（记忆 / 技能 / 检索命中）', async () => {
+    const sessionId = await createSession();
+    modelCalls = 0;
+
+    const { text } = await sendCommand(sessionId, '/context 怎么配数据库');
+
+    expect(text).toContain('长期记忆');
+    expect(text).toContain('技能');
+    expect(text).toContain('跨会话检索');
+    expect(text).toContain('怎么配数据库');
+    expect(modelCalls).toBe(0);
+  });
+
   it('/thinking → 开关思考模式', async () => {
     const sessionId = await createSession();
     const { text } = await sendCommand(sessionId, '/thinking off');

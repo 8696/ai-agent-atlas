@@ -7,7 +7,8 @@ import { logger } from '../logger.js';
 import { estimateTokens } from '../lib/tokens.js';
 import { Session } from '../models/session.model.js';
 import { Message } from '../models/message.model.js';
-import { createChatModel, resolveModel } from './model.js';
+import { createChatModel } from './model.js';
+import { resolveUtilityModel } from './model-utility.js';
 import { recordUsage, usageOf } from './cost.js';
 import { messageText } from './chat-messages.js';
 import { readTextFile } from './prompt.js';
@@ -185,7 +186,7 @@ export async function compressSession(
     };
   }
 
-  const model = resolveModel();
+  const model = resolveUtilityModel();
   if (!model) return { ok: false, message: '还没配置模型 —— 无法生成摘要' };
 
   const folded = messages.slice(0, cut);

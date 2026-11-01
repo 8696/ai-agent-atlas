@@ -36,6 +36,8 @@ interface ToolNodeState {
   autoApprove?: string[] | undefined;
   /** 注入检测命中的特征（**空 = 没命中**） */
   injectionMatches?: string[] | undefined;
+  /** ⚠️ **当前是第几层代理**（0 = 主代理）—— 传给工具，判「还能不能再派」 */
+  depth?: number | undefined;
 }
 
 /**
@@ -171,6 +173,8 @@ export async function toolsNode(
           ...(runnableConfig.signal ? { signal: runnableConfig.signal } : {}),
           rejected: new Set(state.rejectedToolCalls),
           autoApprove: new Set(state.autoApprove ?? []),
+          // 📌 **深度** —— 子代理靠它判断自己还能不能再派一层
+          depth: state.depth ?? 0,
           // 📌 **注入命中 → 权限闸升档**
           injection: injectionOf(state.injectionMatches),
           emit: (card: ToolCard) => {
@@ -210,6 +214,8 @@ export async function toolsNode(
     rejected: new Set(state.rejectedToolCalls),
     // 📌 **显式放行的工具**（无人值守场景 —— 定时任务）
     autoApprove: new Set(state.autoApprove ?? []),
+    // 📌 **深度** —— 子代理靠它判断自己还能不能再派一层
+    depth: state.depth ?? 0,
     // 📌 **注入命中 → 权限闸升档**（见 [10 §10.7](../../docs/10-安全方案.md)）
     injection: injectionOf(state.injectionMatches),
     emit: (card: ToolCard) => {

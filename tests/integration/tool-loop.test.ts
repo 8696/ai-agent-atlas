@@ -205,12 +205,22 @@ function postChat(sessionId: string, text: string): Promise<Response> {
 }
 
 /** 批准 / 取消 */
-function postConfirm(sessionId: string, approved: boolean): Promise<Response> {
+function postConfirm(
+  sessionId: string,
+  approved: boolean,
+  fingerprint?: string,
+): Promise<Response> {
   return fetch(`${baseUrl}/api/v1/chat/confirm`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, approved }),
+    body: JSON.stringify({ sessionId, approved, ...(fingerprint ? { fingerprint } : {}) }),
   });
+}
+
+/** 从待确认的 chunk 里取出参数指纹（**批准必须带** —— 见 [12-b B5](../docs/12-b-需求-对话与编排.md)） */
+function fingerprintOf(chunk: Chunk): string | undefined {
+  const payload = chunk['data'] as { fingerprint?: string } | undefined;
+  return payload?.fingerprint;
 }
 
 describe('工具调用循环（[12-b B4](../docs/12-b-需求-对话与编排.md)）', () => {
@@ -378,7 +388,7 @@ describe('人工确认闸（[12-b B5](../docs/12-b-需求-对话与编排.md)）
         // ⚠️ **还没批准 → 工具没执行**
         expect(executed).toEqual([]);
 
-        const confirm = await postConfirm(sessionId, true);
+        const confirm = await postConfirm(sessionId, true, fingerprintOf(chunk));
         expect(confirm.status).toBe(200);
       }
     }
@@ -439,7 +449,7 @@ describe('人工确认闸（[12-b B5](../docs/12-b-需求-对话与编排.md)）
       if (chunk.type === 'data-pending-confirm') {
         confirms += 1;
         // ⚠️ **每一次挂起都要能等一个决定** —— 第二次挂起不能永远挂着
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 

@@ -1,6 +1,7 @@
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 import { logger } from '../../logger.js';
-import { createChatModel, resolveModel } from '../model.js';
+import { createChatModel } from '../model.js';
+import { resolveUtilityModel } from '../model-utility.js';
 import { isValidCron } from './schedule.js';
 
 /**
@@ -50,7 +51,7 @@ export async function parseScheduleToCron(schedule: string): Promise<string> {
   // 📌 **已经是合法表达式就直接用** —— 不用每次都过模型
   if (isValidCron(text)) return text;
 
-  const model = resolveModel();
+  const model = resolveUtilityModel();
   if (!model) {
     throw new CronParseError(
       '还没配置模型 —— 没法把周期描述翻译成 cron 表达式（也可以直接写 5 段表达式）',

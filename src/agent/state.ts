@@ -143,6 +143,31 @@ export const AtlasState = Annotation.Root({
   }),
 
   /**
+   * ⚠️ **本轮累计的 token**（**每轮开头清零**）。
+   *
+   * 📌 **与 `budgetUsed` 分开** —— `budgetUsed` 是「这个会话一共花了多少」
+   *    （跨轮累加、跟着检查点持久化）；
+   *    这个是「**这一轮**花了多少」，用来判单轮上限
+   *    （见 [12-d D4](./docs/12-d-需求-记忆与配置.md)）。
+   */
+  turnTokens: Annotation<number>({
+    reducer: (_current, update) => update ?? 0,
+    default: () => 0,
+  }),
+
+  /**
+   * ⚠️ **当前是第几层代理**（0 = 主代理 · 1 = 子代理 · 2 = 孙代理）。
+   *
+   * 📌 **深度上限是 `SUBAGENT_MAX_DEPTH`** ——
+   *    到了上限就**不再给这一层 `spawn_subagent` 工具**（模型看不见它），
+   *    防递归（见 [12-b B10](./docs/12-b-需求-对话与编排.md)）。
+   */
+  depth: Annotation<number>({
+    reducer: (_current, update) => update ?? 0,
+    default: () => 0,
+  }),
+
+  /**
    * 隔离模式（**子代理专用**）。
    *
    * ⚠️ **为 true 时不加载主对话的历史与摘要** ——

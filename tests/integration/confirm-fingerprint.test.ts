@@ -255,7 +255,7 @@ describe('确认闸的参数指纹（[12-b B5](../docs/12-b-需求-对话与编�
     expect(executed).toContain('danger_tool');
   });
 
-  it('⚠️ 不带指纹 → 也当成「参数没核对过」，照常按批准处理（向后兼容）', async () => {
+  it('⚠️ 不带指纹 → 不当成批准，重新弹确认', async () => {
     const sessionId = await createSession();
     script = [
       {
@@ -274,15 +274,25 @@ describe('确认闸的参数指纹（[12-b B5](../docs/12-b-需求-对话与编�
       }),
     });
 
-    let confirmed = false;
+    const pending: Array<{ fingerprint?: string }> = [];
+    let first = true;
     for await (const chunk of readChunks(response)) {
-      if (chunk.type === 'data-pending-confirm' && !confirmed) {
-        confirmed = true;
-        await postConfirm(sessionId, true);
+      if (chunk.type === 'data-pending-confirm') {
+        const payload = chunk['data'] as { fingerprint?: string };
+        pending.push(payload);
+        if (first) {
+          first = false;
+          // ⚠️ **故意不带指纹** —— 「没传」不能等于「沿用旧的批准」
+          await postConfirm(sessionId, true);
+        } else {
+          await postConfirm(sessionId, true, payload.fingerprint);
+        }
       }
     }
 
-    expect(confirmed).toBe(true);
+    // 📌 **重新弹了一次** —— 第一次的批准没带指纹，不能算数
+    expect(pending.length).toBeGreaterThanOrEqual(2);
+    // 📌 **第二次带对指纹 → 工具执行了**
     expect(executed).toContain('danger_tool');
   });
 });

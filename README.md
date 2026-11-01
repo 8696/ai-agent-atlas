@@ -10,14 +10,15 @@
 - 等首个字的空窗有加载指示，不会看起来像卡住。
 - 会话落在本地 SQLite：侧栏列表、历史会话页、搜索、收藏、保留期清理。刷新后历史还在。
 - 工具调用显示成卡片：调了哪个工具、参数、返回、耗时。刷新后卡片还在。
-- 13 条斜杠命令（`/help`、`/new`、`/compress`、`/usage`、`/memory`、`/skills` 等），服务端解析，不消耗模型 token。
+- 16 条斜杠命令（`/help`、`/new`、`/compress`、`/usage`、`/memory`、`/skills`、`/context`、`/cron`、`/export` 等），服务端解析，不消耗模型 token。
+- `/context` 能看清「这一轮到底给模型发了什么」：每一段上下文各占多少字、是否截断、为什么被选中。
 - 长会话超预算会自动折成摘要，也可以手动 `/compress`。
 - `/undo` 回退上一轮，`/retry` 重新生成，`/reset` 清空当前上下文（历史记录保留）。
 - 思考模式可以按会话开关。
 
 ### 工具
 
-- 14 个内置工具：读 / 写 / 列目录 / 删除 / 搜索文件、Shell、HTTP 请求、抓网页、联网搜索、当前时间、沙箱代码、无头浏览器、记忆读写、记忆删除。
+- 16 个内置工具：读 / 写 / 列目录 / 删除 / 搜索文件、Shell、HTTP 请求、抓网页、联网搜索、当前时间、沙箱代码、无头浏览器、记忆读写、记忆删除、定时任务管理、派子代理。
 - 编排是 LangGraph.js 状态图：判断意图、调工具、结果回灌、再判断，直到可以回答。单轮步数有上限，同一个工具连续调用也会被拦住。
 - 每轮按相关度裁剪暴露给模型的工具，避免一次塞进全部工具。
 - 不需要确认的多个工具可以并行执行。
@@ -141,6 +142,9 @@ yarn start
 | `/skills` | 列出已安装技能 |
 | `/thinking on\|off` | 思考模式开关 |
 | `/stop` | 停止当前输出 |
+| `/context [问题]` | 看这一轮给模型发了什么（上下文构成报告） |
+| `/cron` | 列出定时任务 |
+| `/export [md\|json]` | 把当前会话导出成文件 |
 
 命令行：
 
@@ -152,6 +156,7 @@ yarn start
 | `yarn cron:list` | 查看定时任务 |
 | `yarn cost:report` | 用量报表 |
 | `yarn tool:logs` | 工具调用流水 |
+| `yarn audit:logs` | 审计日志 |
 | `yarn backup` | 备份数据库和记忆文件 |
 
 ## 内置工具
@@ -161,12 +166,13 @@ yarn start
 | `read_file` / `write_file` / `list_dir` / `delete_path` / `search_files` | 工作区内的文件与目录 |
 | `shell` | 执行命令（可整体关闭） |
 | `http_request` / `web_fetch` | 发请求、抓网页 |
-| `web_search` | 联网搜索（需配置 `WEB_SEARCH_URL`） |
+| `web_search` | 联网搜索（默认免 key 的 DuckDuckGo，也可配 SearXNG / Tavily / Brave） |
 | `browser` | Playwright 无头浏览器（需安装浏览器，可按域名白名单限制） |
 | `execute_code` | 在受限子进程里跑 JavaScript |
 | `current_time` | 当前时间 |
 | `memory` / `memory_forget` | 增改记忆；删除和清空会再确认一次 |
-| `spawn_subagent` | 把子任务派给看不到主对话的子代理 |
+| `spawn_subagent` | 把子任务派给看不到主对话的子代理（还能再派一层，限深度） |
+| `cron` | 在对话里增删查改定时任务 |
 
 技能自带的脚本和 MCP 暴露的工具会进同一个工具池。第三方工具默认每次都要确认。
 

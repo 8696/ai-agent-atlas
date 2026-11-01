@@ -186,12 +186,22 @@ async function createSession(): Promise<string> {
 }
 
 /** 批准 / 取消 */
-function postConfirm(sessionId: string, approved: boolean): Promise<Response> {
+function postConfirm(
+  sessionId: string,
+  approved: boolean,
+  fingerprint?: string,
+): Promise<Response> {
   return fetch(`${baseUrl}/api/v1/chat/confirm`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ sessionId, approved }),
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ sessionId, approved, ...(fingerprint ? { fingerprint } : {}) }),
   });
+}
+
+/** 从待确认的 chunk 里取出参数指纹（**批准必须带**） */
+function fingerprintOf(chunk: Chunk): string | undefined {
+  const payload = chunk['data'] as { fingerprint?: string } | undefined;
+  return payload?.fingerprint;
 }
 
 describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)）', () => {
@@ -226,7 +236,7 @@ describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)
         // 📌 **`execute_code` 是 high 档 → 默认弹确认**
         const payload = chunk['data'] as { toolName?: string };
         expect(payload.toolName).toBe('execute_code');
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 
@@ -271,7 +281,7 @@ describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)
     for await (const chunk of readChunks(response)) {
       if (chunk.type === 'data-pending-confirm' && !confirmed) {
         confirmed = true;
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 
@@ -324,7 +334,7 @@ describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)
       chunks.push(chunk);
       if (chunk.type === 'data-pending-confirm' && !confirmed) {
         confirmed = true;
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 
@@ -369,7 +379,7 @@ describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)
       chunks.push(chunk);
       if (chunk.type === 'data-pending-confirm' && !confirmed) {
         confirmed = true;
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 
@@ -434,7 +444,7 @@ describe('沙箱代码（[12-c C2](../docs/12-c-需求-工具技能与扩展.md)
       chunks.push(chunk);
       if (chunk.type === 'data-pending-confirm' && !confirmed) {
         confirmed = true;
-        await postConfirm(sessionId, true);
+        await postConfirm(sessionId, true, fingerprintOf(chunk));
       }
     }
 

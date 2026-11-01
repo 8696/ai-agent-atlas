@@ -4,7 +4,8 @@ import { config } from '../config.js';
 import { DIRS } from '../config/paths.js';
 import { logger } from '../logger.js';
 import { writeAudit } from '../lib/audit.js';
-import { createChatModel, resolveModel } from '../services/model.js';
+import { createChatModel } from '../services/model.js';
+import { resolveUtilityModel } from '../services/model-utility.js';
 import { recordUsage, usageOf } from '../services/cost.js';
 import { recordToolCall } from '../services/tool-log.js';
 import { readTextFile } from '../services/prompt.js';
@@ -138,7 +139,7 @@ export async function runSkillAutocreate(input: {
     if (!first.done) handledTurns.delete(first.value);
   }
 
-  const model = resolveModel();
+  const model = resolveUtilityModel();
   if (!model) return none('还没配置模型');
 
   // ── 问模型「这轮有没有值得沉淀的经验」 ──

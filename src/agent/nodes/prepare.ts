@@ -96,6 +96,8 @@ export async function prepareNode(state: {
     lastToolCount: 0,
     rejectedToolCalls: [],
     steps: 0,
+    // 📌 **本轮 token 清零** —— 单轮上限按「这一轮」算
+    turnTokens: 0,
     haltReason: null,
     notice: null,
     summary,

@@ -128,16 +128,27 @@ LLM_MODEL=glm-5.3
 
 | 分组 | 配置项                                                                                                                                                            |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 通用 | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT` · `SESSION_RETENTION_DAYS`                                                    |
-| 模型 | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` · `LLM_FALLBACK_BASE_URL` · `LLM_FALLBACK_API_KEY` · `LLM_FALLBACK_MODEL` · `LLM_TEMPERATURE` · `LLM_MAX_TOKENS` · `LLM_THINKING_BUDGET` · `MULTI_TOOL_CALLS` |
+| 通用 | `SYSTEM_LANGUAGE` · `TIMEZONE` · `MAX_TOOL_STEPS` · `TOOL_TIMEOUT_MS` · `WORKSPACE_ROOT` · `SESSION_RETENTION_DAYS` · `MAX_TOKENS_PER_TURN` · `SUBAGENT_MAX_DEPTH` |
+| 模型 | `LLM_BASE_URL` · `LLM_API_KEY` · `LLM_MODEL` · `LLM_FALLBACK_BASE_URL` · `LLM_FALLBACK_API_KEY` · `LLM_FALLBACK_MODEL` · `LLM_AUX_BASE_URL` · `LLM_AUX_API_KEY` · `LLM_AUX_MODEL` · `LLM_PROMPT_CACHE` · `LLM_TEMPERATURE` · `LLM_MAX_TOKENS` · `LLM_THINKING_BUDGET` · `MULTI_TOOL_CALLS` |
 | 记忆 | `MEMORY_ENABLED` · `MEMORY_RELEVANCE_ENABLED` · `MEMORY_TOP_K` · `MEMORY_TOKEN_BUDGET` · `MEMORY_MAX_CHARS` · `USER_MAX_CHARS` · `SUMMARY_ENABLED` · `SUMMARY_TOKEN_BUDGET` |
 | 成本 | `MONTHLY_TOKEN_BUDGET` · `COST_BUDGET_BLOCK` · `WARN_RATIO`                                                                                                        |
 | 安全 | `ALLOW_PRIVATE_EGRESS` · `SHELL_ENABLED` · `TOOL_CONFIRM_LEVEL`                                                                                                    |
 | 工具 | `TOOL_OUTPUT_MAX_CHARS` · `TOOL_OUTPUT_TRUNCATE` · `SAME_TOOL_REPEAT_LIMIT` · `MAX_TOOLS_PER_TURN`                                                                 |
-| 其它 | `NODE_ENV` · `PORT` · `HOST` · `DATABASE_PATH` · `MCP_CONFIG_PATH` · `AGENTS_MAX_CHARS` · `SUBAGENT_MAX_CONCURRENCY` · `SUBAGENT_MAX_STEPS` · `CRON_ENABLED` · `SKILL_*` · `BROWSER_*` · `WEB_SEARCH_URL` · `LOG_LEVEL` |
+| 其它 | `NODE_ENV` · `PORT` · `HOST` · `DATABASE_PATH` · `MCP_CONFIG_PATH` · `AGENTS_MAX_CHARS` · `SUBAGENT_MAX_CONCURRENCY` · `SUBAGENT_MAX_STEPS` · `CRON_ENABLED` · `SKILL_*` · `BROWSER_*` · `WEB_SEARCH_URL` · `WEB_SEARCH_PROVIDER` · `WEB_SEARCH_API_KEY` · `LOG_LEVEL` |
 
 > 📌 **模型的三个参数用 `LLM_*` 前缀**（不是 `DEFAULT_*`）——
 > 一个模型一份配置，详见 [12-a A3](./12-a-需求-应用外壳与上下文.md)。
+
+> 📌 **2026-11-01 新增的几个 key**：
+>
+> | key | 作用 |
+> | --- | --- |
+> | `LLM_AUX_BASE_URL` / `LLM_AUX_API_KEY` / `LLM_AUX_MODEL` | **辅助模型** —— 记忆抽取 / 会话摘要 / 检索摘要走它（**留空 = 没有**） |
+> | `LLM_PROMPT_CACHE` | **提示词缓存**（Anthropic 的 `cache_control`）—— 端点不支持自动退回 |
+> | `WEB_SEARCH_PROVIDER` | 搜索后端类型（`auto` / `searxng` / `tavily` / `brave` / `duckduckgo`） |
+> | `WEB_SEARCH_API_KEY` | 搜索后端的 Key（tavily / brave 用） |
+> | `MAX_TOKENS_PER_TURN` | **单轮 token 上限**（**0 = 不限**） |
+> | `SUBAGENT_MAX_DEPTH` | 子代理能再派几层（默认 2） |
 > 📌 **`SYSTEM_LANGUAGE` 管的是「Agent 回复用什么语言」**，不是界面语言
 > （界面文案是写死的中文，前端没有设置页）。
 

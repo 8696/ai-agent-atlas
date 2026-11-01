@@ -31,6 +31,7 @@ export function answerNode(
     notice: string | null;
     haltReason: string | null;
     steps: number;
+    turnTokens?: number | undefined;
     sessionId?: string | undefined;
     messageId?: string | undefined;
   },
@@ -47,7 +48,18 @@ export function answerNode(
 
   // ⚠️ **步数上限也要说清楚** —— 不能默默停下
   const stepLimitHit = (state.steps ?? 0) >= config.MAX_TOOL_STEPS;
-  const notice = state.notice ?? state.haltReason ?? (stepLimitHit ? '已达到步数上限' : null);
+  // ⚠️ **单轮 token 上限也要说清楚** —— 用户要知道为什么停了
+  const tokenLimitHit =
+    config.MAX_TOKENS_PER_TURN > 0 &&
+    (state.turnTokens ?? 0) >= config.MAX_TOKENS_PER_TURN;
+  const notice =
+    state.notice ??
+    state.haltReason ??
+    (tokenLimitHit
+      ? `已达到单轮 token 上限（${config.MAX_TOKENS_PER_TURN}）—— 改 .env 的 MAX_TOKENS_PER_TURN 可以调`
+      : stepLimitHit
+        ? '已达到步数上限'
+        : null);
   if (notice) {
     // ⚠️ **用 `getWriter(config)`** —— 见 `plan.ts` 的注释
     getWriter(runnableConfig)?.({ type: 'notice', text: notice });
@@ -57,7 +69,12 @@ export function answerNode(
   //    ⚠️ **不阻塞本轮回答**（见 [12-c C4.2](../docs/12-c-需求-工具技能与扩展.md)）
   //    ⚠️ **工具调用次数不够就不问** —— 闲聊不该沉淀技能
   const toolCallCount = state.steps ?? 0;
-  if (toolCallCount >= config.SKILL_MIN_TOOL_CALLS) {
+  // ⚠️ **门槛不能跟 `MAX_TOOL_STEPS` 撞车** ——
+  //    两个都是 5 的时候，沉淀提问**只会在「工具预算用满」的那一刻**才触发，
+  //    平时跑满 4 次工具调用就答完的复杂活反而不沉淀。
+  //    现在两个条件都算：**用够了次数** 或 **这轮把预算用满了**（后者一定是复杂活）。
+  const effectiveThreshold = Math.min(config.SKILL_MIN_TOOL_CALLS, config.MAX_TOOL_STEPS);
+  if (toolCallCount >= effectiveThreshold || stepLimitHit) {
     void runSkillAutocreate({
       userText: lastUserText(state.messages),
       assistantText: text,

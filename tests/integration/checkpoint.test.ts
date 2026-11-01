@@ -140,6 +140,14 @@ describe('断点恢复（[12-b B6](../docs/12-b-需求-对话与编排.md)）', 
     );
     expect(interrupted).toBeDefined();
 
+    // 📌 **参数指纹要从挂起的那份载荷里取** ——
+    //    批准必须带指纹（见 [12-b B5](../docs/12-b-需求-对话与编排.md)）
+    const interruptedState = (interrupted as [string, unknown])[1] as {
+      __interrupt__?: Array<{ value?: { fingerprint?: string } }>;
+    };
+    const fingerprint = interruptedState.__interrupt__?.[0]?.value?.fingerprint;
+    expect(fingerprint).toBeTruthy();
+
     // ⚠️ **检查点真的落盘了**
     const rows = await sequelize.query<{ c: number }>(
       'SELECT COUNT(*) AS c FROM graph_checkpoints WHERE thread_id = :threadId',
@@ -149,7 +157,11 @@ describe('断点恢复（[12-b B6](../docs/12-b-需求-对话与编排.md)）', 
 
     // ⚠️ **「重启」** —— 重新建图（新的 checkpointer 实例，状态只能从库里读）
     const graph2 = createGraph();
-    const second = await runGraph(graph2, new Command({ resume: { approved: true } }), threadId);
+    const second = await runGraph(
+      graph2,
+      new Command({ resume: { approved: true, ...(fingerprint ? { fingerprint } : {}) } }),
+      threadId,
+    );
 
     // ⚠️ **批准后工具执行了，且只执行一次**
     expect(executed).toEqual(['danger_tool']);

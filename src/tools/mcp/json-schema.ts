@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MAX_ARRAY, MAX_STRING } from '../args.js';
 
 /**
  * JSON Schema → zod —— **MCP 工具的入参 schema 是 JSON Schema**
@@ -70,16 +71,22 @@ export function jsonSchemaToZod(node: unknown, depth = 0): z.ZodType {
           const field = jsonSchemaToZod(value, depth + 1);
           shape[key] = required.has(key) ? field : field.optional();
         }
-        result = z.object(shape);
+        // 📌 **字段数也有上限** —— 第三方 server 可能给一个 500 字段的 schema
+        result = z.object(shape).refine(
+          (value) => Object.keys(value).length <= MAX_ARRAY,
+          { message: `字段太多（上限 ${MAX_ARRAY} 个）` },
+        );
         break;
       }
       case 'array': {
         const items = schema['items'];
-        result = z.array(jsonSchemaToZod(items, depth + 1));
+        // ⚠️ **数组长度有上限** —— 与内置工具同一套口径
+        result = z.array(jsonSchemaToZod(items, depth + 1)).max(MAX_ARRAY);
         break;
       }
       case 'string':
-        result = z.string();
+        // ⚠️ **字符串长度有上限** —— 与内置工具同一套口径
+        result = z.string().max(MAX_STRING);
         break;
       case 'number':
         result = z.number();

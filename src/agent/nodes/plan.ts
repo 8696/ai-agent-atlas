@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { AIMessage, SystemMessage } from '@langchain/core/messages';
+import { AIMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { getWriter } from '@langchain/langgraph';
 import { config } from '../../config.js';
@@ -8,13 +8,19 @@ import { scanInjection, tightenSensitivity } from '../../lib/security/injection.
 import { disabledTools } from '../../lib/security/policy.js';
 import { estimateTokens } from '../../lib/tokens.js';
 import { writeAudit } from '../../lib/audit.js';
-import { buildSystemPrompt, promptFallbackNotice, readAgentsInstructions } from '../../services/prompt.js';
+import {
+  buildSystemPrompt,
+  promptFallbackNotice,
+  readAgentsInstructions,
+  systemMessage,
+} from '../../services/prompt.js';
 import {
   resolveFallback,
   resolveModel,
   type ResolvedModel,
 } from '../../services/model.js';
 import { streamChatModel, readReasoningDelta } from '../model-stream.js';
+import { canSpawnSubagent } from '../subagent.js';
 import { recordUsage } from '../../services/cost.js';
 import { getSessionSettings } from '../../services/session.js';
 import { requestSignal } from '../abort.js';
@@ -88,6 +94,10 @@ export async function planNode(
     isolated?: boolean | undefined;
     model?: string | undefined;
     usageScope?: UsageScope | undefined;
+    /** ⚠️ **当前是第几层代理**（0 = 主代理）—— 判「还能不能再派一层」 */
+    depth?: number | undefined;
+    /** ⚠️ **本轮已经用掉的 token** —— 判单轮上限 */
+    turnTokens?: number | undefined;
   },
   runnableConfig: { signal?: AbortSignal },
 ): Promise<AtlasStateUpdate> {
@@ -125,8 +135,17 @@ export async function planNode(
   //    而不是「看得见但一调就报错」—— 见 [12-b B3](../docs/12-b-需求-对话与编排.md)）
   const disabled = disabledTools(config);
   const enabled = registry.list().filter((tool) => tool.enabled && !disabled.has(tool.name));
-  // ⚠️ **子代理不能派子代理** —— 防递归（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
-  const pool = state.isolated ? enabled.filter((tool) => tool.executor !== 'none') : enabled;
+  // ⚠️ **子代理不能调「不可被子代理调用」的工具**（如 `memory_forget`）
+  // 📌 **深度上限之内可以再派** —— `SUBAGENT_MAX_DEPTH`（默认 2）：
+  //    「并行调研 → 汇总 → 成稿」这种三层活才做得成；
+  //    到了上限就把 `spawn_subagent` 从池子里拿掉 —— **模型看不见它**。
+  const depth = state.depth ?? 0;
+  const canSpawn = canSpawnSubagent(depth);
+  const pool = enabled.filter((tool) => {
+    if (state.isolated && tool.executor === 'none') return false;
+    if (tool.name === 'spawn_subagent' && !canSpawn) return false;
+    return true;
+  });
   const query = lastUserText(state.messages);
   const selected = selectTools(pool, query, config);
 
@@ -150,7 +169,13 @@ export async function planNode(
     //    （见 [12-a A4](../docs/12-a-需求-应用外壳与上下文.md)）
     agents: readAgentsInstructions(),
   });
-  const messages: BaseMessage[] = [new SystemMessage(systemPrompt), ...state.messages];
+  // 📌 **提示词缓存**（`.env` 的 `LLM_PROMPT_CACHE`）——
+  //    系统提示词每轮重复注入，命中缓存按打折价计费；
+  //    端点不支持会自动退回不缓存（见 `agent/model-stream.ts`）
+  const messages: BaseMessage[] = [
+    systemMessage(systemPrompt, config.LLM_PROMPT_CACHE),
+    ...state.messages,
+  ];
 
   // 📌 **优先用网关登记的那份信号** —— LangGraph 组合出来的那个
   //    偶尔对不上（客户端断开时上游停不下来，白烧 token）；
@@ -175,6 +200,8 @@ export async function planNode(
     thinkingBudget,
     messages,
     tools: tools.length > 0 ? toLangChainTools(tools) : [],
+    // 📌 **提示词缓存** —— 端点不支持会自动退回不缓存
+    cacheEnabled: config.LLM_PROMPT_CACHE,
     ...(signal ? { signal } : {}),
     onStrategyChange: (from, to, reason) => {
       logger.warn({ from, to, reason: reason.slice(0, 200) }, '模型策略变了');
@@ -305,6 +332,8 @@ export async function planNode(
   return {
     messages: [aiMessage],
     budgetUsed: usage,
+    // 📌 **本轮累计** —— 单轮上限按「这一轮」算（不是整个会话）
+    turnTokens: (state.turnTokens ?? 0) + usage,
     // 📌 **注入命中要带进权限闸** —— 只收紧给模型看的那份副本是空的
     injectionMatches: scan.detected ? scan.matches : [],
   };

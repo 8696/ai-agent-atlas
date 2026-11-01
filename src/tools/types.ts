@@ -45,6 +45,13 @@ export interface ToolContext {
    *    （见 [10 §10.7](../../docs/10-安全方案.md)）。
    */
   injectionMatches?: string[] | undefined;
+  /**
+   * ⚠️ **当前是第几层代理**（0 = 主代理，1 = 子代理，2 = 孙代理）。
+   *
+   * 📌 **子代理靠它决定「还能不能再派」** ——
+   *    深度上限是 `SUBAGENT_MAX_DEPTH`（见 [12-b B10](./docs/12-b-需求-对话与编排.md)）。
+   */
+  depth?: number | undefined;
 }
 
 /** 工具执行结果 */

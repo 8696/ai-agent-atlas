@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { Semaphore } from '../../src/agent/subagent-pool';
-import { spawnSubagentTool, subagentThreadId } from '../../src/agent/subagent';
+import {
+  canSpawnSubagent,
+  spawnSubagentTool,
+  subagentThreadId,
+} from '../../src/agent/subagent';
 
 /**
  * 子代理的单元测试 —— **并发闸与工具元信息**。
@@ -8,7 +12,7 @@ import { spawnSubagentTool, subagentThreadId } from '../../src/agent/subagent';
  * 覆盖（[12-b B10](../../docs/12-b-需求-对话与编排.md)）：
  * - 并发超过上限 → **排队**，不失败
  * - 子代理的 thread_id 稳定（父图恢复时不能换）
- * - 子代理不能再派子代理
+ * - 子代理能再派一层（**限深度** —— 到顶那一层就看不见这个工具）
  */
 
 describe('子代理并发闸', () => {
@@ -49,8 +53,21 @@ describe('子代理并发闸', () => {
 });
 
 describe('子代理工具', () => {
-  it('⚠️ 子代理不能再派子代理（防递归）', () => {
-    expect(spawnSubagentTool.executor).toBe('none');
+  it('📌 子代理能再派一层（限深度，不是彻底禁掉）', () => {
+    expect(spawnSubagentTool.executor).toBe('subagent');
+  });
+
+  it('⚠️ 深度到顶 → 那一层不能再派（防递归）', () => {
+    // 📌 **默认上限 2** —— 主代理 → 子代理 → 孙代理
+    expect(canSpawnSubagent(0)).toBe(true);
+    expect(canSpawnSubagent(1)).toBe(true);
+    expect(canSpawnSubagent(2)).toBe(false);
+    expect(canSpawnSubagent(3)).toBe(false);
+  });
+
+  it('⚠️ 上限调成 1 → 只有主代理能派', () => {
+    expect(canSpawnSubagent(0, 1)).toBe(true);
+    expect(canSpawnSubagent(1, 1)).toBe(false);
   });
 
   it('派发本身走统一权限闸（不是自己偷偷跑）', () => {
@@ -66,5 +83,11 @@ describe('子代理工具', () => {
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a.startsWith('subagent:')).toBe(true);
+  });
+
+  it('⚠️ 不同深度的子代理 → 不同 thread_id（检查点不能串）', () => {
+    const a = subagentThreadId('sess-1', 'call-1', 1);
+    const b = subagentThreadId('sess-1', 'call-1', 2);
+    expect(a).not.toBe(b);
   });
 });

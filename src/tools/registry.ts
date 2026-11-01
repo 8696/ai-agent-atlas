@@ -1,11 +1,12 @@
 import { tool as makeTool } from '@langchain/core/tools';
-import { config } from '../config.js';
 import { logger } from '../logger.js';
 import { spawnSubagentTool } from '../agent/subagent.js';
 import { getSkills } from '../skills/store.js';
 import { skillToolGroups } from '../skills/tools.js';
 import { fsTools } from './builtin/fs.js';
+import { cronToolGroups } from './builtin/cron.js';
 import { httpTools } from './builtin/http.js';
+import { searchTools } from './builtin/search.js';
 import { memoryTools } from './builtin/memory.js';
 import { shellTools } from './builtin/shell.js';
 import { timeTools } from './builtin/time.js';
@@ -107,12 +108,18 @@ export function builtinToolGroups(): ToolGroup[] {
   return [
     { source: 'builtin', tools: fsTools },
     { source: 'builtin', tools: shellTools },
-    { source: 'builtin', tools: httpTools(config.WEB_SEARCH_URL) },
+    { source: 'builtin', tools: httpTools() },
+    // 📌 **联网搜索** —— **始终注册**（默认走免 key 的 DuckDuckGo）
+    //    （见 [12-c C2](./docs/12-c-需求-工具技能与扩展.md)）
+    ...searchTools(),
     { source: 'builtin', tools: timeTools },
     // 📌 **记忆管理** —— `memory`（查看/新增/改写/归档）·
     //    `memory_forget`（永久删除/清空，**high 档要确认**）
     //    （见 [12-d D4](../docs/12-d-需求-记忆与配置.md)）
     { source: 'builtin', tools: memoryTools },
+    // 📌 **定时任务管理** —— `cron`（增删查改，**normal 档**）
+    //    （见 [12-b B11](./docs/12-b-需求-对话与编排.md)）
+    ...cronToolGroups(),
     // 📌 **子代理派发** —— 也是内置工具（见 [12-b B10](../docs/12-b-需求-对话与编排.md)）
     { source: 'builtin', tools: [spawnSubagentTool] },
     // 📌 **沙箱代码** —— Hermes 的招牌能力（见 [12-c C2](../docs/12-c-需求-工具技能与扩展.md)）

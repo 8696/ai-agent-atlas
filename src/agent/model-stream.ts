@@ -1,6 +1,7 @@
 import type { BaseMessage } from '@langchain/core/messages';
 import { logger } from '../logger.js';
 import { createChatModel, type ResolvedModel } from '../services/model.js';
+import { stripCacheControl } from '../services/prompt.js';
 
 /**
  * 调模型 —— **带降级与故障转移**（见 [12-a A3](../docs/12-a-需求-应用外壳与上下文.md)）。
@@ -111,6 +112,18 @@ export function errorText(err: unknown): string {
   return parts.join(' · ');
 }
 
+/**
+ * 这个错是不是「端点不支持提示词缓存」。
+ *
+ * ⚠️ **宁可多降级一次** —— 去掉缓存标记只是这一轮没有缓存，
+ * 猜错了大不了多花点钱，不会把对话搞坏。
+ */
+export function isCacheUnsupportedError(err: unknown): boolean {
+  const text = errorText(err);
+  if (!text) return false;
+  return /cache_control|cache control|缓存/i.test(text);
+}
+
 export interface ModelStreamOptions {
   /** 主模型 */
   primary: ResolvedModel;
@@ -126,6 +139,11 @@ export interface ModelStreamOptions {
   signal?: AbortSignal | undefined;
   /** 切模型时的回调（**写日志 / 审计**） */
   onStrategyChange?: ((from: StreamStrategy, to: StreamStrategy, reason: string) => void) | undefined;
+  /**
+   * ⚠️ **提示词缓存**（`.env` 的 `LLM_PROMPT_CACHE`）——
+   * 端点不支持时会**自动去掉缓存标记重试**。
+   */
+  cacheEnabled?: boolean | undefined;
 }
 
 /**
@@ -140,6 +158,9 @@ export async function* streamChatModel(
 
   let useFallback = false;
   let budget = thinkingBudget;
+  // 📌 **缓存开着就带着标记** —— 端点不支持时再退回去
+  let cache = options.cacheEnabled === true;
+  const plainMessages = cache ? stripCacheControl(messages) : messages;
 
   for (;;) {
     const model = useFallback ? fallback : primary;
@@ -165,7 +186,7 @@ export async function* streamChatModel(
           ? chatModel.bindTools(tools as never[])
           : chatModel;
 
-      const stream = await bound.stream(messages, {
+      const stream = await bound.stream(cache ? messages : plainMessages, {
         ...(signal ? { signal } : {}),
       });
 
@@ -179,6 +200,16 @@ export async function* streamChatModel(
       if (emitted) throw err;
 
       const reason = errorText(err);
+
+      // ── ⓪ 端点不支持缓存 → 去掉标记重试 ──
+      if (cache && isCacheUnsupportedError(err)) {
+        logger.warn(
+          { model: model.name, reason: reason.slice(0, 300) },
+          '端点不接受提示词缓存 —— 去掉缓存标记重试',
+        );
+        cache = false;
+        continue;
+      }
 
       // ── ① 供应商不支持思考 → 关掉思考重试 ──
       if (budget > 0 && isThinkingUnsupportedError(err)) {

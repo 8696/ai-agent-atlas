@@ -68,6 +68,28 @@ export function resolveFallback(env: Env = config): ResolvedModel | undefined {
 }
 
 /**
+ * 取辅助模型（**没配就是没有** —— 调用方回落到主模型）。
+ *
+ * 📌 **辅助模型干「脏活」** —— 记忆抽取 / 会话摘要 / 检索摘要 /
+ *    技能沉淀判断 / cron 表达式解析。
+ *    这些活输入长、输出短、不需要多强的推理，
+ *    拿主模型（尤其开了思考的）干，**钱花得最冤**。
+ */
+export function resolveAuxModel(env: Env = config): ResolvedModel | undefined {
+  if (!env.LLM_AUX_MODEL) return undefined;
+  return {
+    name: env.LLM_AUX_MODEL,
+    baseUrl: env.LLM_AUX_BASE_URL,
+    apiKey: env.LLM_AUX_API_KEY,
+    modelId: env.LLM_AUX_MODEL,
+    maxTokens: env.LLM_MAX_TOKENS,
+    temperature: env.LLM_TEMPERATURE,
+    // ⚠️ **辅助模型不思考** —— 「脏活」不需要推理，省下的都是真金白银
+    thinkingBudget: 0,
+  };
+}
+
+/**
  * 推理预算 —— 只看 `.env` 的 `LLM_THINKING_BUDGET`。
  * 大于 0 就开，0 就关。聊天页没有开关。
  */

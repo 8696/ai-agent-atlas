@@ -11,6 +11,7 @@ import {
   setSessionFavorite,
 } from '../services/session.js';
 import { listMessages, setMessageFavorite } from '../services/message.js';
+import { exportSession } from '../services/session-export.js';
 
 /**
  * 会话网关 —— `/api/v1/sessions` · `/api/v1/messages/:id/favorite`
@@ -118,6 +119,23 @@ sessionRouter.patch('/sessions/:id/favorite', async (ctx) => {
     throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
   }
   ctx.body = session;
+});
+
+/**
+ * `GET /api/v1/sessions/:id/export` —— **导出会话**（`?format=md|json`，默认 md）。
+ *
+ * 📌 **直接下载** —— 响应带 `Content-Disposition`，
+ *    浏览器点开这个地址就能存下来。
+ */
+sessionRouter.get('/sessions/:id/export', async (ctx) => {
+  const format = ctx.request.query['format'] === 'json' ? 'json' : 'md';
+  const result = await exportSession(pathParam(ctx.params.id, 'id'), format);
+  if (!result) {
+    throw new AppError('SESSION_NOT_FOUND', '会话不存在了（可能已被删除）', 404);
+  }
+  ctx.set('Content-Type', result.mimeType);
+  ctx.set('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(result.filename)}`);
+  ctx.body = result.content;
 });
 
 /**

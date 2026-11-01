@@ -1,7 +1,8 @@
 import { QueryTypes } from 'sequelize';
 import { sequelize } from '../db.js';
 import { logger } from '../logger.js';
-import { createChatModel, resolveModel } from './model.js';
+import { createChatModel } from './model.js';
+import { resolveUtilityModel } from './model-utility.js';
 import { recordUsage, usageOf } from './cost.js';
 import { probeFts, searchMemory, searchMessages, ensureFtsTables } from '../lib/fts.js';
 import { MEMORY_FILES } from './memory/types.js';
@@ -161,7 +162,7 @@ export async function searchAll(
  */
 export async function summarizeHits(query: string, hits: SearchHit[]): Promise<string> {
   if (hits.length === 0) return '';
-  const model = resolveModel();
+  const model = resolveUtilityModel();
   if (!model) return '';
 
   const lines = hits.map((hit, index) => `${index + 1}. [${hit.title}] ${hit.snippet}`);

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { assertArgsSize } from '../args.js';
 import { truncateOutput } from '../output.js';
 import type { ToolDefinition, ToolResult } from '../types.js';
 import type { McpServerConfig } from './config.js';
@@ -75,6 +76,9 @@ export function mcpToolDefinitions(
       executor: 'local',
       async invoke(args: unknown): Promise<ToolResult> {
         try {
+          // ⚠️ **入参先过体积闸** —— 第三方 schema 认不出来的字段
+          //    是「放宽」的（`z.unknown()`），没有这道闸就能塞超大字符串进上下文
+          assertArgsSize(args);
           const result = await bridge.callTool(server.name, descriptor.name, args);
           const clipped = truncateOutput(result.text);
           if (result.isError) {

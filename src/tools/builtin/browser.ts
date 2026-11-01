@@ -1,6 +1,8 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createRequire } from 'node:module';
+import { lookup } from 'node:dns/promises';
+import { isIP } from 'node:net';
 import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { config, paths } from '../../config.js';
@@ -74,7 +76,7 @@ export function domainAllowed(hostname: string, patterns: string[]): boolean {
   });
 }
 
-/** 校验一个网址能不能访问 */
+/** 校验一个网址能不能访问（**只看字符串** —— 不解析 DNS） */
 export function assertBrowserUrlAllowed(
   rawUrl: string,
   allowlist: string[] = parseAllowedDomains(config.BROWSER_ALLOWED_DOMAINS),
@@ -96,6 +98,88 @@ export function assertBrowserUrlAllowed(
     throw new Error(
       `域名「${url.hostname}」不在白名单里（白名单：${allowlist.join('、')}）—— 改白名单或换个网址`,
     );
+  }
+  return url;
+}
+
+/**
+ * DNS 解析结果的缓存（**10 秒**）。
+ *
+ * 📌 **别每个子资源都查一次 DNS** —— 一个页面几十个请求。
+ * ⚠️ **缓存 10 秒** —— 够挡住「同一页里换解析结果」，又不至于太脏。
+ */
+const dnsCache = new Map<string, { at: number; addresses: string[] }>();
+
+/** DNS 缓存有效期（毫秒） */
+const DNS_CACHE_MS = 10_000;
+
+/** 解析主机名（**测试可注入**） */
+export async function resolveBrowserHost(
+  hostname: string,
+  resolve?: (hostname: string) => Promise<string[]>,
+): Promise<string[]> {
+  const cached = dnsCache.get(hostname);
+  if (cached && Date.now() - cached.at < DNS_CACHE_MS) return cached.addresses;
+  const resolver = resolve ?? defaultBrowserResolve;
+  try {
+    const addresses = await resolver(hostname);
+    dnsCache.set(hostname, { at: Date.now(), addresses });
+    return addresses;
+  } catch {
+    // 📌 **解析不了不报错** —— 真正的请求会给出更准确的错误
+    return [];
+  }
+}
+
+/** 默认的 DNS 解析 */
+async function defaultBrowserResolve(hostname: string): Promise<string[]> {
+  const records = await lookup(hostname, { all: true });
+  return records.map((record) => record.address);
+}
+
+/** 这个主机名是不是「本机」 */
+function isLocalHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === 'localhost' || host.endsWith('.localhost');
+}
+
+/**
+ * 校验一个网址能不能访问（**解析 DNS**）。
+ *
+ * ⚠️ **白名单只查字符串是不够的** —— 域名解析到哪儿没人管：
+ *   - **云元数据 / 链路本地一律拦**（不管白名单空不空）——
+ *     一撞就泄露云凭据
+ *   - **白名单非空时**：域名解析到内网 / 回环 → 拦
+ *     （用户明确划了边界，域名就不该被 DNS 指到内网去）
+ *   - **白名单为空时**：内网 / 回环放行（**回环默认放行** —— 本机服务）
+ *
+ * @param resolve DNS 解析（**测试可注入**）
+ */
+export async function assertBrowserUrlAllowedAsync(
+  rawUrl: string,
+  allowlist: string[] = parseAllowedDomains(config.BROWSER_ALLOWED_DOMAINS),
+  resolve?: (hostname: string) => Promise<string[]>,
+): Promise<URL> {
+  const url = assertBrowserUrlAllowed(rawUrl, allowlist);
+  const hostname = url.hostname.toLowerCase();
+  // 📌 **IP 字面量静态判过了** —— 不用再解析
+  if (isIP(hostname)) return url;
+  // 📌 **本机名（localhost）回环放行** —— 与「回环默认放行」一致
+  if (isLocalHostname(hostname)) return url;
+
+  const addresses = await resolveBrowserHost(hostname, resolve);
+  for (const address of addresses) {
+    const kind = classifyEndpointHost(address);
+    if (kind === 'blocked') {
+      throw new Error(
+        `拒绝访问「${hostname}」—— 它解析到云元数据 / 链路本地地址（${address}）`,
+      );
+    }
+    if (allowlist.length > 0 && (kind === 'private' || kind === 'loopback')) {
+      throw new Error(
+        `拒绝访问「${hostname}」—— 它解析到内网地址（${address}），不在白名单的允许范围内`,
+      );
+    }
   }
   return url;
 }
@@ -163,7 +247,8 @@ async function ensurePage(): Promise<{
     }) => {
       const url = route.request().url();
       try {
-        assertBrowserUrlAllowed(url);
+        // ⚠️ **每个请求都过一遍** —— 而且**要解析 DNS**（不止查字符串）
+        await assertBrowserUrlAllowedAsync(url);
         await route.continue();
       } catch {
         await route.abort('blockedbyclient');
@@ -206,7 +291,7 @@ export const browserTool: ToolDefinition = {
       switch (input.action) {
         case 'navigate': {
           if (!input.url) return { ok: false, output: 'navigate 动作需要 url 参数' };
-          const url = assertBrowserUrlAllowed(input.url);
+          const url = await assertBrowserUrlAllowedAsync(input.url);
           await page.goto(url.toString(), { waitUntil: 'domcontentloaded', timeout });
           const title = await page.title();
           return {

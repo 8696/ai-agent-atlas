@@ -1,5 +1,7 @@
 import { Op } from 'sequelize';
-import { config } from '../config.js';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { config, paths } from '../config.js';
 import { logger } from '../logger.js';
 import { sequelize } from '../db.js';
 import { Message } from '../models/message.model.js';
@@ -16,6 +18,9 @@ import {
 } from './memory/index.js';
 import type { MemoryFile } from './memory/types.js';
 import { compressSession, loadSessionMessages } from './session-summary.js';
+import { buildContextReport, renderContextReport } from './context-report.js';
+import { describeCronTask, loadCronTasks } from './cron/store.js';
+import { exportSession } from './session-export.js';
 import {
   createSession,
   findSession,
@@ -58,6 +63,17 @@ export const COMMANDS: CommandSpec[] = [
   { name: 'usage', usage: '/usage', summary: '本月 token / 花费 / 本会话用量' },
   { name: 'memory', usage: '/memory [list|delete|clear]', summary: '查看长期记忆；删条目（/memory delete USER 名字）或清空（/memory clear USER）' },
   { name: 'skills', usage: '/skills', summary: '列出已安装技能' },
+  { name: 'cron', usage: '/cron', summary: '列出定时任务' },
+  {
+    name: 'export',
+    usage: '/export [md|json]',
+    summary: '把当前会话导出成 Markdown（默认）或 JSON，文件落在 data/exports/',
+  },
+  {
+    name: 'context',
+    usage: '/context [问题]',
+    summary: '看这一轮给模型发了什么（上下文构成报告；带问题则算动态段）',
+  },
   { name: 'thinking', usage: '/thinking on|off', summary: '思考模式开关（下一轮生效）' },
   { name: 'stop', usage: '/stop', summary: '停止当前流式输出' },
 ];
@@ -422,6 +438,27 @@ export async function runCommand(
         };
       }
 
+      case 'context': {
+        // 📌 **零 LLM 调用** —— 这条命令的价值就在于「不花钱也能查」
+        const settings = sessionId ? await getSessionSettings(sessionId) : {};
+        const report = await buildContextReport({
+          ...(sessionId ? { sessionId } : {}),
+          ...(parsed.args ? { query: parsed.args } : {}),
+          ...(settings.personality ? { personality: settings.personality } : {}),
+        });
+        return {
+          text: renderContextReport(report),
+          data: {
+            command: 'context',
+            query: report.query,
+            fixedTokens: report.sections.reduce((sum, item) => sum + item.tokens, 0),
+            dynamicTokens: report.dynamic.reduce((sum, item) => sum + item.tokens, 0),
+            tools: report.tools.pool,
+          },
+          action: 'none',
+        };
+      }
+
       case 'memory': {
         // 📌 **子命令 + 参数** —— `/memory delete USER prefers-pnpm`
         const parts = parsed.args ? parsed.args.split(/\s+/).filter(Boolean) : [];
@@ -505,6 +542,41 @@ export async function runCommand(
                 ].join('\n')
               : '还没有安装任何技能（把技能目录拷进 `data/skills/` 即可）。',
           data: { command: 'skills', skills },
+          action: 'none',
+        };
+      }
+
+      case 'cron': {
+        const tasks = loadCronTasks();
+        const text =
+          tasks.length > 0
+            ? [
+                '**定时任务**',
+                '',
+                ...tasks.map((task) => `- \`${task.id}\` · ${describeCronTask(task)}`),
+                '',
+                '在对话里直接说「每天 9 点提醒我……」就能加任务。',
+              ].join('\n')
+            : '还没有定时任务（对话里说「每天 9 点提醒我……」就能加，或用 `yarn cron:add`）。';
+        return {
+          text,
+          data: { command: 'cron', count: tasks.length },
+          action: 'none',
+        };
+      }
+
+      case 'export': {
+        if (!sessionId) return { text: '当前没有会话 —— `/new` 开一个。', action: 'none' };
+        const format = parsed.args.toLowerCase() === 'json' ? 'json' : 'md';
+        const result = await exportSession(sessionId, format);
+        if (!result) return { text: '会话不存在了（可能已被删除）。', action: 'none' };
+        const dir = join(paths.data, 'exports');
+        mkdirSync(dir, { recursive: true });
+        const file = join(dir, result.filename);
+        writeFileSync(file, result.content, 'utf8');
+        return {
+          text: `已导出：${file}`,
+          data: { command: 'export', path: file, format },
           action: 'none',
         };
       }

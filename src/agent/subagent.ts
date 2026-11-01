@@ -25,11 +25,41 @@ import { Semaphore } from './subagent-pool.js';
  * | 并发上限     | `SUBAGENT_MAX_CONCURRENCY`（默认 3）—— 满了排队             |
  * | 回灌         | **摘要**（默认 2000 字符）—— 不是全量过程                   |
  *
- * ⚠️ **子代理不能再派子代理**（`executor: 'none'`）—— 防递归。
+ * 📌 **子代理能再派一层**（限深度）——
+ *    深度上限是 `SUBAGENT_MAX_DEPTH`（默认 2 = 主代理 → 子代理 → 孙代理），
+ *    到了上限那一层就**看不见 `spawn_subagent` 工具**（模型看不见就不会调）。
  */
 
 /** 摘要长度上限（**回灌给主 Agent 的只有这一段**） */
 const SUMMARY_MAX_CHARS = 2000;
+
+/**
+ * 这一层还能不能再派子代理。
+ *
+ * 📌 **深度上限 `SUBAGENT_MAX_DEPTH`（默认 2）** ——
+ *    0 = 主代理（能派）· 1 = 子代理（能派孙代理）· 2 = 孙代理（**到顶了**）。
+ *
+ * ⚠️ **不靠「子代理看不见工具」防递归** —— 到了上限那一层
+ *    **模型就看不见 `spawn_subagent`**（见 `nodes/plan.ts`），
+ *    所以它连想派都派不出去。
+ */
+export function canSpawnSubagent(depth: number, maxDepth = config.SUBAGENT_MAX_DEPTH): boolean {
+  return depth < maxDepth;
+}
+
+/**
+ * 回灌给主 Agent 的整段文本。
+ *
+ * ⚠️ **上限管的是「整段」** —— 前面那句「子代理 xx 跑完了」也是回灌内容，
+ *    只截摘要的话实际进上下文的会多出几十个字符
+ *    （以前就是这样 —— 摘要 2000 字 + 前缀，上限形同虚设）。
+ */
+function subagentOutput(name: string, steps: number, summary: string): string {
+  const head = `子代理「${name}」跑完了（用了 ${steps} 次工具）。\n\n`;
+  const room = Math.max(0, SUMMARY_MAX_CHARS - head.length);
+  const body = summary.length > room ? summary.slice(0, room) : summary;
+  return head + body;
+}
 
 /** `spawn_subagent` 的入参 */
 const spawnSchema = z.object({
@@ -46,9 +76,16 @@ const spawnSchema = z.object({
  *
  * ⚠️ **必须稳定** —— 父图恢复时会重跑这个节点，
  *    thread_id 变了就等于开了个新子代理，前面的进度全丢。
+ *
+ * 📌 **深度要算进去** —— 不同层的子代理可能拿到同样的工具调用 id，
+ *    不带深度的话两层会撞到同一个 thread 上（**检查点串了**）。
  */
-export function subagentThreadId(sessionId: string | undefined, toolCallId: string | undefined): string {
-  const seed = `${sessionId ?? ''}::${toolCallId ?? ''}`;
+export function subagentThreadId(
+  sessionId: string | undefined,
+  toolCallId: string | undefined,
+  depth = 0,
+): string {
+  const seed = `${sessionId ?? ''}::${toolCallId ?? ''}::${depth}`;
   const digest = createHash('sha256').update(seed).digest('hex').slice(0, 16);
   return `subagent:${digest}`;
 }
@@ -83,16 +120,21 @@ const completed = new Map<string, SubagentResult>();
 /** 表的上限（**别让它无限涨**） */
 const MEMO_LIMIT = 50;
 
-/** 读已完成的结果 */
-export function memoizedSubagent(toolCallId: string | undefined): SubagentResult | undefined {
-  if (!toolCallId) return undefined;
-  return completed.get(toolCallId);
+/**
+ * 读已完成的结果。
+ *
+ * 📌 **按 thread_id 记** —— thread_id 里带深度，
+ *    不同层的子代理不会撞到同一格（见 `subagentThreadId`）。
+ */
+export function memoizedSubagent(threadId: string | undefined): SubagentResult | undefined {
+  if (!threadId) return undefined;
+  return completed.get(threadId);
 }
 
 /** 记一个已完成的结果 */
-function rememberSubagent(toolCallId: string | undefined, result: SubagentResult): void {
-  if (!toolCallId) return;
-  completed.set(toolCallId, result);
+function rememberSubagent(threadId: string | undefined, result: SubagentResult): void {
+  if (!threadId) return;
+  completed.set(threadId, result);
   // ⚠️ **先进先出** —— 超过上限就丢最老的
   while (completed.size > MEMO_LIMIT) {
     const oldest = completed.keys().next();
@@ -133,6 +175,8 @@ export async function runSubagent(options: {
   sessionId?: string | undefined;
   model?: string | undefined;
   signal?: AbortSignal | undefined;
+  /** ⚠️ **这一层是第几层**（1 = 子代理 · 2 = 孙代理） */
+  depth?: number | undefined;
 }): Promise<SubagentResult> {
   const graph = getGraph();
   // 📌 **子代理的消息 id 带前缀** —— 工具流水里能一眼看出
@@ -148,6 +192,8 @@ export async function runSubagent(options: {
       isolated: true,
       // 📌 **子代理自己的步数上限**
       maxSteps: config.SUBAGENT_MAX_STEPS,
+      // 📌 **深度** —— 这一层还能不能继续派（见 `SUBAGENT_MAX_DEPTH`）
+      depth: options.depth ?? 1,
       // 📌 **子代理可以指定模型**（默认继承主模型）
       ...(options.model ? { model: options.model } : {}),
     },
@@ -202,21 +248,22 @@ export const spawnSubagentTool: ToolDefinition = {
   riskNote: '会派一个子代理去跑这个子任务 —— 它能用同一套工具，但看不到主对话的历史。',
   source: 'builtin',
   enabled: true,
-  // ⚠️ **子代理不能再派子代理** —— 防递归
-  executor: 'none',
+  // 📌 **子代理也能派**（限深度）—— `SUBAGENT_MAX_DEPTH`（默认 2）
+  //    到了深度上限，这一层就**看不见这个工具**（见 `nodes/plan.ts`）
+  executor: 'subagent',
   async invoke(args: unknown, context): Promise<ToolResult> {
     const input = parseArgs(spawnSchema, args);
     const name = input.name?.trim() || `子代理 ${nanoid(4)}`;
-    const threadId = subagentThreadId(context.sessionId, context.toolCallId);
+    // 📌 **深度** —— 主代理是 0，子代理是 1，孙代理是 2
+    const depth = context.depth ?? 0;
+    const threadId = subagentThreadId(context.sessionId, context.toolCallId, depth);
 
     // 📌 **已经跑过就别再跑一遍** —— 父图恢复时整个节点会重跑
-    const memo = memoizedSubagent(context.toolCallId);
+    const memo = memoizedSubagent(threadId);
     if (memo) {
       return {
         ok: true,
-        output: `子代理「${memo.name}」跑完了（用了 ${memo.steps} 次工具）。\n\n${
-          memo.summary || '(没有产出)'
-        }`,
+        output: subagentOutput(memo.name, memo.steps, memo.summary || '(没有产出)'),
         data: {
           name: memo.name,
           task: input.task,
@@ -241,11 +288,13 @@ export const spawnSubagentTool: ToolDefinition = {
         task: input.task,
         name,
         threadId,
+        // 📌 **深度 +1** —— 这一层是子代理，它自己还能不能派由 `SUBAGENT_MAX_DEPTH` 判
+        depth: depth + 1,
         ...(context.sessionId ? { sessionId: context.sessionId } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
       });
-      rememberSubagent(context.toolCallId, result);
+      rememberSubagent(threadId, result);
 
       logger.info(
         { subagent: name, steps: result.steps, threadId },
@@ -254,9 +303,7 @@ export const spawnSubagentTool: ToolDefinition = {
 
       return {
         ok: true,
-        output:
-          `子代理「${name}」跑完了（用了 ${result.steps} 次工具）。\n\n` +
-          (result.summary || '(没有产出)'),
+        output: subagentOutput(name, result.steps, result.summary || '(没有产出)'),
         data: {
           name,
           task: input.task,

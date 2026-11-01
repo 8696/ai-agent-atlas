@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { SystemMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { config } from '../config.js';
 import { DIRS, FILES, PROJECT_ROOT } from '../config/paths.js';
 import { fallbackCreatedFiles } from '../config/ensure.js';
@@ -170,6 +172,50 @@ export function languageInstruction(): string {
   const lang = config.SYSTEM_LANGUAGE.trim();
   if (lang === '') return '';
   return `## 回复语言\n\n用 **${lang}** 回复用户（语言由 \`.env\` 的 \`SYSTEM_LANGUAGE\` 决定）。`;
+}
+
+/** 缓存标记（**Anthropic 的 `cache_control`**） */
+const CACHE_CONTROL = { type: 'ephemeral' as const };
+
+/**
+ * 系统提示词消息 —— **要不要打缓存标记**。
+ *
+ * 📌 **为什么值得打** —— 系统提示词每轮都要重复注入
+ * （`AGENTS.md` + 记忆 + 技能 + 工具清单），
+ * 缓存命中时这段**按打折价计费**，能省下一大截。
+ *
+ * ⚠️ **端点未必支持** —— 国产兼容端点有可能直接报 400，
+ *    那时走「去掉标记重试」那条路（见 `agent/model-stream.ts`）。
+ */
+export function systemMessage(text: string, cache: boolean): SystemMessage {
+  if (!cache) return new SystemMessage(text);
+  return new SystemMessage({
+    content: [{ type: 'text', text, cache_control: CACHE_CONTROL }] as never,
+  });
+}
+
+/**
+ * 把消息里的缓存标记去掉 —— **端点不支持时的退路**。
+ *
+ * 📌 **只动系统消息** —— 其余消息本来就是逐轮变化的，缓存没有意义。
+ */
+export function stripCacheControl(messages: BaseMessage[]): BaseMessage[] {
+  return messages.map((message) => {
+    if (message.getType() !== 'system') return message;
+    const content = message.content;
+    if (typeof content === 'string') return message;
+    if (!Array.isArray(content)) return message;
+    const text = content
+      .map((block) => {
+        if (typeof block === 'object' && block !== null && 'text' in block) {
+          const value = (block as { text?: unknown }).text;
+          return typeof value === 'string' ? value : '';
+        }
+        return '';
+      })
+      .join('');
+    return new SystemMessage(text);
+  });
 }
 
 /**

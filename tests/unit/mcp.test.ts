@@ -223,4 +223,44 @@ describe('MCP 工具定义', () => {
     expect(result?.ok).toBe(false);
     expect(result?.output).toContain('连不上');
   });
+
+  it('⚠️ 入参太大 → 拒绝（不让第三方 server 往上下文里塞超大字符串）', async () => {
+    const callTool = vi.fn(() => Promise.resolve({ text: 'ok', isError: false }));
+    const tools = mcpToolDefinitions(
+      server,
+      [{ name: 'echo', description: '回显', inputSchema: { type: 'object' } }],
+      { callTool },
+    );
+    const result = await tools[0]?.invoke({ blob: 'x'.repeat(300_000) }, {});
+    expect(result?.ok).toBe(false);
+    expect(result?.output).toContain('参数太大');
+    expect(callTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('MCP 策略查询', () => {
+  it('⚠️ 改名后的工具名也能查到策略（`toolPolicy: auto` 别丢）', async () => {
+    const { McpManager, stripMcpPrefix } = await import('../../src/tools/mcp/manager');
+    const manager = new McpManager();
+    manager.registerForTest(
+      {
+        name: 'demo',
+        transport: 'stdio',
+        command: 'echo',
+        args: [],
+        env: {},
+        headers: {},
+        enabled: true,
+        toolPolicy: 'auto',
+      },
+      [{ name: 'demo__echo', tool: 'echo' }],
+    );
+
+    expect(manager.policyFor('demo__echo')).toBe('auto');
+    // 📌 **注册表撞名时改名成 `mcp__<原名>`** —— 策略照样要查得到
+    expect(manager.policyFor('mcp__demo__echo')).toBe('auto');
+    expect(stripMcpPrefix('mcp__demo__echo')).toBe('demo__echo');
+    // 📌 **不是 MCP 工具 → undefined**（权限闸会走后面的档位规则）
+    expect(manager.policyFor('read_file')).toBeUndefined();
+  });
 });

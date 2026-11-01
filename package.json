@@ -21,6 +21,7 @@
     "migrate": "tsx scripts/migrate.ts",
     "migrate:undo": "tsx scripts/migrate.ts --undo",
     "tool:logs": "tsx scripts/tool-logs.ts",
+    "audit:logs": "tsx scripts/audit-logs.ts",
     "cron:list": "tsx scripts/cron.ts list",
     "cron:add": "tsx scripts/cron.ts add",
     "cron:remove": "tsx scripts/cron.ts remove",

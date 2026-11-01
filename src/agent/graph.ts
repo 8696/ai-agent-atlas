@@ -31,6 +31,19 @@ interface RouteState {
   haltReason: string | null;
   /** 步数上限（**子代理用自己的** —— 0 = 用全局的） */
   maxSteps?: number | undefined;
+  /** 本轮已用掉的 token（**判单轮上限**） */
+  turnTokens?: number | undefined;
+}
+
+/**
+ * 这一轮是不是已经用超了单轮 token 上限。
+ *
+ * ⚠️ **0 = 不限** —— 默认不擅自加限制（见 `.env` 的 `MAX_TOKENS_PER_TURN`）。
+ */
+export function turnOverTokenLimit(state: { turnTokens?: number | undefined }): boolean {
+  const limit = config.MAX_TOKENS_PER_TURN;
+  if (limit <= 0) return false;
+  return (state.turnTokens ?? 0) >= limit;
 }
 
 /**
@@ -40,6 +53,8 @@ interface RouteState {
  */
 export function routeAfterPlan(state: RouteState): 'tools' | 'answer' {
   if (state.haltReason) return 'answer';
+  // ⚠️ **单轮 token 上限** —— 用超了就收尾，不再继续调工具
+  if (turnOverTokenLimit(state)) return 'answer';
   return pickNextToolCall(state) ? 'tools' : 'answer';
 }
 
@@ -55,6 +70,8 @@ export function routeAfterTools(state: RouteState): 'tools' | 'plan' | 'answer' 
   // ⚠️ **步数上限** —— 超了直接收尾（子代理用自己的上限）
   const limit = state.maxSteps && state.maxSteps > 0 ? state.maxSteps : config.MAX_TOOL_STEPS;
   if ((state.steps ?? 0) >= limit) return 'answer';
+  // ⚠️ **单轮 token 上限** —— 用超了就收尾
+  if (turnOverTokenLimit(state)) return 'answer';
   return pickNextToolCall(state) ? 'tools' : 'plan';
 }
 
